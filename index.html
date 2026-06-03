@@ -2134,26 +2134,43 @@ function renderModCustos(c) {
 // ============================================================
 function renderModPecuario(c) {
   const d = dadosAtuais()
-  const lucroPorCabeca = d.totalCabecas ? (d.receitaTotal - d.despesaTotal)/d.totalCabecas : 0
-  const margemArroba = d.totalArrobas ? (d.receitaTotal - d.despesaTotal)/d.totalArrobas : 0
+  // Sincroniza com o Estoque Animal: se houver rebanho cadastrado, usa o total real do estoque
+  const est = calcEstoque()
+  const usaEstoque = est.total > 0
+  const totalCabecas = usaEstoque ? est.total : d.totalCabecas
+  const totalArrobas = d.totalArrobas // arrobas vêm de pesagens (Onda 2) / planilha
+  const lucroTotal = d.receitaTotal - d.despesaTotal
+  const lucroPorCabeca = totalCabecas ? lucroTotal/totalCabecas : 0
+  const margemArroba = totalArrobas ? lucroTotal/totalArrobas : 0
+  const custoPorCabeca = totalCabecas ? d.despesaTotal/totalCabecas : 0
+
+  const fonte = usaEstoque
+    ? `<span style="font-size:11px;color:#16a34a">● sincronizado com o Estoque Animal (${est.cats.filter(x=>est.porCategoria[x]>0).length} categorias)</span>`
+    : `<span style="font-size:11px;color:#9ca3af">cabeças vindas da planilha — cadastre o rebanho em Estoque Animal para sincronizar</span>`
+
+  const cardsCategoria = usaEstoque ? `<div class="kpi-grid" style="margin-top:10px">
+    ${est.cats.filter(cat=>est.porCategoria[cat]>0).map(cat=>`<div class="kpi"><div class="kpi-label">${cat}</div><div class="kpi-value">${fmtNum(est.porCategoria[cat])}</div></div>`).join('')}
+  </div>` : ''
+
   c.innerHTML = pageHeader(ICON.pecuario,'Indicadores Pecuários','Desempenho zootécnico e econômico por cabeça e arroba') +
-    `<div class="widget-grid">
+    `<div style="margin-bottom:12px">${fonte}</div>
+    <div class="widget-grid">
       ${modCard('Rebanho', `<div class="kpi-grid">
-        <div class="kpi"><div class="kpi-label">Total Cabeças</div><div class="kpi-value blue">${fmtNum(d.totalCabecas)}</div></div>
-        <div class="kpi"><div class="kpi-label">Total Arrobas</div><div class="kpi-value yellow">${fmtNum(d.totalArrobas)}</div></div>
-      </div>`,'half')}
+        <div class="kpi"><div class="kpi-label">Total Cabeças</div><div class="kpi-value blue">${fmtNum(totalCabecas)}</div></div>
+        <div class="kpi"><div class="kpi-label">Total Arrobas</div><div class="kpi-value yellow">${fmtNum(totalArrobas)}</div></div>
+      </div>${cardsCategoria}`)}
       ${modCard('Por Cabeça', `<div class="kpi-grid">
-        <div class="kpi"><div class="kpi-label">Custo / Cabeça</div><div class="kpi-value neg">${fmt(d.custoPorCabeca)}</div></div>
-        <div class="kpi"><div class="kpi-label">Receita / Cabeça</div><div class="kpi-value pos">${fmt(d.totalCabecas?d.receitaTotal/d.totalCabecas:0)}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo / Cabeça</div><div class="kpi-value neg">${fmt(custoPorCabeca)}</div></div>
+        <div class="kpi"><div class="kpi-label">Receita / Cabeça</div><div class="kpi-value pos">${fmt(totalCabecas?d.receitaTotal/totalCabecas:0)}</div></div>
         <div class="kpi"><div class="kpi-label">Lucro / Cabeça</div><div class="kpi-value ${lucroPorCabeca>=0?'pos':'neg'}">${fmt(lucroPorCabeca)}</div></div>
       </div>`,'half')}
       ${modCard('Por Arroba', `<div class="kpi-grid">
         <div class="kpi"><div class="kpi-label">Receita / Arroba</div><div class="kpi-value pos">${fmt(d.receitaPorArroba)}</div></div>
-        <div class="kpi"><div class="kpi-label">Custo / Arroba</div><div class="kpi-value neg">${fmt(d.totalArrobas?d.despesaTotal/d.totalArrobas:0)}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo / Arroba</div><div class="kpi-value neg">${fmt(totalArrobas?d.despesaTotal/totalArrobas:0)}</div></div>
         <div class="kpi"><div class="kpi-label">Margem / Arroba</div><div class="kpi-value ${margemArroba>=0?'pos':'neg'}">${fmt(margemArroba)}</div></div>
-      </div>`)}
+      </div>`,'half')}
     </div>
-    ${!d.temPecuaria?'<p style="color:#9ca3af;font-size:13px;margin-top:12px">⚠️ Nenhuma coluna de cabeças/arrobas detectada na planilha. Os indicadores por cabeça/arroba aparecem quando a planilha tiver esses dados.</p>':''}`
+    ${(!usaEstoque && !d.temPecuaria)?'<p style="color:#9ca3af;font-size:13px;margin-top:12px">⚠️ Sem rebanho no Estoque Animal e sem cabeças/arrobas na planilha. Cadastre o rebanho em <strong>Estoque Animal</strong> para os indicadores aparecerem.</p>':''}`
 }
 
 // ============================================================
@@ -3281,6 +3298,7 @@ async function abrirSeletorClientes(){
 }
 async function acessarCliente(ws){
   await carregarDados(ws)
+  try { LS.setItem('dre_last_ws', ws) } catch(e){}
   document.getElementById('clienteOverlay').classList.add('hidden')
   iniciarApp()
 }
@@ -3325,7 +3343,7 @@ async function renderModUsuarios(c){
   const TIPO_EVENTO = {
     login:{t:'Login',c:'#16a34a'}, logout:{t:'Logout',c:'#9ca3af'}, import:{t:'Importação',c:'#2563eb'},
     lancamento:{t:'Lançamento',c:'#0c064b'}, criar_usuario:{t:'Criou usuário',c:'#7c3aed'},
-    excluir_usuario:{t:'Excluiu usuário',c:'#dc2626'}, nova_empresa:{t:'Nova empresa',c:'#0891b2'}
+    excluir_usuario:{t:'Excluiu usuário',c:'#dc2626'}, nova_empresa:{t:'Nova empresa',c:'#0891b2'}, estoque:{t:'Estoque animal',c:'#65a30d'}
   }
   const filtroHist = `<div class="filter-bar" style="border:none;padding:0 0 10px">
       <span class="filter-label">Filtrar</span>
@@ -3772,7 +3790,14 @@ async function bootCloud(){
   document.getElementById('loginLogo').src = document.querySelector('.logo img').src
   const u = await carregarPerfil()
   if (!u || u.erro){ buildNav(); mostrarLogin(); return }
-  if (u.perfil === 'suporte'){ buildNav(); abrirSeletorClientes(); return }
+  if (u.perfil === 'suporte'){
+    // mantém o suporte no último cliente acessado (continua logado/configurado até sair)
+    const last = LS.getItem('dre_last_ws')
+    let existe = false
+    try { const { data } = await sb.from('dados').select('workspace').eq('workspace', last).maybeSingle(); existe = !!data } catch(e){}
+    if (last && existe){ await carregarDados(last); iniciarApp(); return }
+    buildNav(); abrirSeletorClientes(); return
+  }
   await carregarDados(u.workspace)
   iniciarApp()
 }
