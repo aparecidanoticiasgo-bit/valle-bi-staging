@@ -209,6 +209,8 @@
   #navBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:140}
 
   @media(max-width:1024px){
+    /* remover backdrop-filter no mobile: ele cria containing-block e prende o menu fixo dentro do header */
+    .header{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:#fff!important}
     .hamburger{display:flex;align-items:center;justify-content:center}
     #navBar{position:fixed;top:0;right:0;height:100%;width:min(80vw,300px);background:#fff;
       flex-direction:column!important;align-items:stretch!important;gap:2px!important;
