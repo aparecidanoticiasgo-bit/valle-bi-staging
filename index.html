@@ -1637,9 +1637,10 @@ function calcular(lancamentos) {
       const est = calcEstoque()
       if (est.total > 0) {
         totalCabecas = est.total; cabecasFonte = 'estoque'
+        // arrobas vêm SÓ das pesagens do estoque (não da planilha financeira, que não é confiável p/ rebanho)
         let arr = 0
         ;(state.pastos||[]).forEach(p=>{ const sp=est.porPasto[p.id]||{total:0}; const pm=(typeof pesoMedioPasto==='function')?pesoMedioPasto(p.id):0; if(pm>0) arr += sp.total*pm/15 })
-        if (arr > 0) totalArrobas = arr
+        totalArrobas = arr  // 0 enquanto não houver pesagens — evita número absurdo vindo da planilha
       }
     }
   } catch(e){}
@@ -1687,8 +1688,16 @@ const WIDGET_DEFS = [
   { id:'dre',        label:'DRE Completa',            span:'full'  },
   { id:'fazendas',   label:'Fazendas',                span:'full'  },
   { id:'cc',         label:'Centro de Custo',         span:'half'  },
-  { id:'pecuaria',   label:'Indicadores Pecuários',   span:'full'  },
+  { id:'pecuaria',   label:'Indicadores Pecuários',   span:'half'  },
+  { id:'agro',       label:'Indicadores de Agricultura', span:'half' },
 ]
+
+// Resumo da agricultura (todas as entidades/safras)
+function agroResumo(){
+  let area=0,sacas=0,custo=0,receitaEst=0,culturas=0
+  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{ area+=Number(s.ha)||0; sacas+=Number(s.sacas)||0; custo+=Number(s.custo)||0; receitaEst+=(Number(s.sacas)||0)*(Number(s.preco)||0); culturas++ }) })
+  return { area, sacas, custo, receitaEst, culturas }
+}
 
 const LAYOUT_KEY = 'dre_layout_v1'
 
@@ -1925,6 +1934,7 @@ function renderDashboard() {
   const visibles = layout.filter(w => {
     if (!w.visible) return false
     if (w.id === 'pecuaria' && !d.temPecuaria) return false
+    if (w.id === 'agro' && agroResumo().area <= 0) return false
     if (w.id === 'cc' && Object.keys(d.porCC).length <= 1) return false
     return true
   })
@@ -1941,6 +1951,7 @@ function renderDashboard() {
       case 'fazendas': return widget(w.id, w.label, w.span, htmlFazendas(d) + chartToolbar('fazendas') + `<div class="chart-wrap"><canvas id="cFazendas"></canvas></div>`)
       case 'cc':       return widget(w.id, w.label, w.span, chartToolbar('cc')+`<div class="chart-wrap"><canvas id="cCC"></canvas></div>`)
       case 'pecuaria': return widget(w.id, w.label, w.span, htmlPecuaria(d))
+      case 'agro':     return widget(w.id, w.label, w.span, htmlAgro(d))
       default: return ''
     }
   }).join('')
@@ -2189,6 +2200,21 @@ function htmlPecuaria(d) {
     <div class="kpi"><div class="kpi-label">Total Arrobas</div><div class="kpi-value yellow">${fmtNum(d.totalArrobas)}</div></div>
     <div class="kpi"><div class="kpi-label">Custo / Cabeça</div><div class="kpi-value neg">${fmt(d.custoPorCabeca)}</div></div>
     <div class="kpi"><div class="kpi-label">Receita / Arroba</div><div class="kpi-value pos">${fmt(d.receitaPorArroba)}</div></div>
+  </div>`
+}
+
+function htmlAgro(d) {
+  const a = agroResumo()
+  const prod   = a.area>0 ? a.sacas/a.area : 0   // sacas por hectare
+  const custoHa= a.area>0 ? a.custo/a.area : 0
+  const margem = a.receitaEst - a.custo
+  return `<div class="kpi-grid">
+    <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(a.area)} <span style="font-size:13px;color:#9ca3af">ha</span></div></div>
+    <div class="kpi"><div class="kpi-label">Produtividade</div><div class="kpi-value yellow">${prod.toFixed(1)} <span style="font-size:13px;color:#9ca3af">sc/ha</span></div></div>
+    <div class="kpi"><div class="kpi-label">Custo / ha</div><div class="kpi-value neg">${fmt(custoHa)}</div></div>
+    <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${fmt(a.receitaEst)}</div></div>
+    <div class="kpi"><div class="kpi-label">Margem Estimada</div><div class="kpi-value ${margem>=0?'pos':'neg'}">${fmt(margem)}</div></div>
+    <div class="kpi"><div class="kpi-label">Produção Total</div><div class="kpi-value">${fmtNum(a.sacas)} <span style="font-size:13px;color:#9ca3af">sc</span></div></div>
   </div>`
 }
 
@@ -3978,6 +4004,29 @@ async function renderModMercado(c){
     ${!d.totalArrobas?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Importe planilha com arrobas para calcular o valor do rebanho.</p>':''}
   `)
 
+  // valor da produção agrícola (sacas × preço; reavalia soja/milho pela cotação quando houver)
+  const ag = agroResumo()
+  const cotProd = id => { const h = rows.filter(r=>r.produto===id).sort((x,y)=>(x.data<y.data?1:-1))[0]; return h?h.valor:0 }
+  const cotSoja = cotProd('soja'), cotMilho = cotProd('milho')
+  let valorMercado = 0, usouMercado = false
+  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{
+    const sc = Number(s.sacas)||0, cult = (s.cultura||'').toLowerCase()
+    let preco = Number(s.preco)||0
+    if (cult==='soja'  && cotSoja){  preco = cotSoja;  usouMercado = true }
+    if (cult==='milho' && cotMilho){ preco = cotMilho; usouMercado = true }
+    valorMercado += sc*preco
+  }) })
+  const agroCard = modCard('Valor da Produção Agrícola', `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(ag.area)} <span style="font-size:11px;color:#9ca3af">ha</span></div></div>
+      <div class="kpi"><div class="kpi-label">Produção</div><div class="kpi-value">${fmtNum(ag.sacas)} <span style="font-size:11px;color:#9ca3af">sc</span></div></div>
+      <div class="kpi"><div class="kpi-label">Valor (preço cadastrado)</div><div class="kpi-value pos">${ag.receitaEst?fmt(ag.receitaEst):'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Valor a mercado</div><div class="kpi-value pos">${valorMercado?fmt(valorMercado):'—'}</div></div>
+    </div>
+    ${ag.area<=0?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Cadastre safras no módulo Agricultura para calcular.</p>':''}
+    ${usouMercado?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Soja/Milho reavaliados pela cotação atual; demais culturas pelo preço cadastrado.</p>':''}
+  `)
+
   const botaoAdd = ehAdmin() ? `<div style="margin-bottom:8px"><button class="btn-primary" onclick="novaCotacao()">+ Lançar cotação</button></div>` : ''
 
   c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias por estado e valor do rebanho') +
@@ -3985,6 +4034,7 @@ async function renderModMercado(c){
     `<div class="widget-grid">
       ${modCard('Cotações atuais'+(mercadoUF!=='TODOS'?' — '+mercadoUF:''), `<div class="kpi-grid">${cards}</div>`)}
       ${rebanhoCard}
+      ${agroCard}
     </div>`
 }
 function fmtDataCot(d){ if(!d) return ''; const [y,m,dia]=d.split('-'); return `${dia}/${m}/${y.slice(2)}` }
