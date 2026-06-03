@@ -2321,12 +2321,14 @@ function htmlAgro(d) {
     const qtd = un==='kg' ? c.kg : c.sc
     const prod = c.area>0 ? qtd/c.area : 0
     const prodTxt = (c.sc>0 && c.kg>0) ? `${fmtNum(c.sc)} sc + ${fmtNum(c.kg)} kg` : `${fmtNum(qtd)} ${un}`
+    const margemC = c.receita - c.custo
     return `<tr>
       <td style="padding:6px 6px;font-weight:600;color:#1d1d1f">${escapeHtml(c.cultura)}</td>
       <td style="padding:6px 6px;text-align:right;color:#6b7280">${fmtNum(c.area)} ha</td>
       <td style="padding:6px 6px;text-align:right">${prodTxt}</td>
       <td style="padding:6px 6px;text-align:right;color:#0c064b;font-weight:700">${prod?prod.toFixed(1):'—'} ${un}/ha</td>
       <td style="padding:6px 6px;text-align:right;color:#16a34a">${c.receita?fmt(c.receita):'—'}</td>
+      <td style="padding:6px 6px;text-align:right;font-weight:600;color:${margemC>=0?'#16a34a':'#dc2626'}">${(c.receita||c.custo)?fmt(margemC):'—'}</td>
     </tr>`
   }).join('')
   return `<div class="kpi-grid" style="margin-bottom:12px">
@@ -2342,8 +2344,9 @@ function htmlAgro(d) {
           <th style="text-align:right;padding:4px 6px">Produção</th>
           <th style="text-align:right;padding:4px 6px">Produtiv.</th>
           <th style="text-align:right;padding:4px 6px">Receita est.</th>
+          <th style="text-align:right;padding:4px 6px">Margem</th>
         </tr></thead>
-        <tbody>${linhas || '<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Cadastre culturas no módulo Agricultura.</td></tr>'}</tbody>
+        <tbody>${linhas || '<tr><td colspan="6" style="padding:10px;color:#9ca3af;text-align:center">Cadastre culturas no módulo Agricultura.</td></tr>'}</tbody>
       </table>
     </div>
     <p style="font-size:11px;color:#9ca3af;margin-top:8px">Produção e produtividade são por cultura (a produtividade por hectare varia entre soja, milho, gergelim, etc.).</p>`
