@@ -721,6 +721,7 @@ const ICON = {
   lock:       _svg('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   user:       _svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/>'),
   empresas:   _svg('<rect x="3" y="8" width="8" height="12" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/><line x1="6" y1="12" x2="8" y2="12"/><line x1="6" y1="16" x2="8" y2="16"/><line x1="16" y1="8" x2="18" y2="8"/><line x1="16" y1="12" x2="18" y2="12"/>'),
+  tema:       _svg('<circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 22a10 10 0 1 1 0-20c5 0 8 3 8 6 0 2-2 3-4 3h-2a2 2 0 0 0-1 4 2 2 0 0 1-1 4z"/>'),
   agro:       _svg('<path d="M12 21v-7"/><path d="M12 14c0-3-2-5-5-5 0 3 2 5 5 5z"/><path d="M12 12c0-3 2-5 5-5 0 3-2 5-5 5z"/><path d="M7 21h10"/>'),
   comparativo:_svg('<line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="20" y1="20" x2="20" y2="7"/>'),
   alertas:    _svg('<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/>'),
@@ -746,6 +747,7 @@ const MODULES = [
   { id:'entidades',    label:'Cadastros',      icon:ICON.entidades,   kind:'entidades' },
   { id:'usuarios',     label:'Usuários',       icon:ICON.usuarios,    kind:'generic',  render:renderModUsuarios, adminOnly:true },
   { id:'empresas',     label:'Empresas',       icon:ICON.empresas,    kind:'generic',  render:renderModEmpresas, suporteOnly:true },
+  { id:'personalizacao', label:'Personalização', icon:ICON.tema,      kind:'generic',  render:renderModPersonalizacao, suporteOnly:true },
 ]
 
 // Papéis e permissões padrão (quais módulos cada papel acessa)
@@ -787,11 +789,22 @@ function podeAcessar(modId) {
 
 let currentModule = 'dashboard'
 
+function modulosOrdenados(){
+  const t = state.tema || {}
+  const ordem = t.menuOrder || []
+  const lista = [...MODULES].sort((a,b)=>{
+    const ia=ordem.indexOf(a.id), ib=ordem.indexOf(b.id)
+    return (ia<0?999:ia)-(ib<0?999:ib)
+  })
+  return lista
+}
 function buildNav() {
   const nav = document.getElementById('navBar')
   nav.innerHTML = ''
-  MODULES.forEach(m => {
+  const ocultos = (state.tema && state.tema.menuHidden) || []
+  modulosOrdenados().forEach(m => {
     if (!podeAcessar(m.id)) return
+    if (ocultos.includes(m.id) && !ehSuporte()) return // suporte sempre vê tudo
     const b = document.createElement('button')
     b.className = 'nav-btn' + (m.id === currentModule ? ' active' : '')
     b.id = 'nav-' + m.id
@@ -3272,9 +3285,21 @@ function importarComoCliente(file) {
   r.readAsText(file)
 }
 
+function aplicarTema(){
+  const t = state.tema || {}
+  const root = document.documentElement
+  root.style.setProperty('--green', t.corPrimaria || '#0c064b')
+  const logo = t.logo || '__default__'
+  document.querySelectorAll('.logo img').forEach(img=>{ if(t.logo) img.src=t.logo })
+  const ll = document.getElementById('loginLogo'); if(ll && t.logo) ll.src=t.logo
+  // título
+  if (t.nome){ const h=document.querySelector('.logo h1'); if(h) h.textContent=t.nome }
+}
+
 function iniciarApp() {
   document.getElementById('loginOverlay').classList.add('hidden')
   document.getElementById('clienteOverlay').classList.add('hidden')
+  aplicarTema()
   buildNav()
   // primeira aba que o usuário pode acessar
   const u = usuarioAtual()
@@ -3488,7 +3513,8 @@ let _saveTimer = null
 function dadosApp(){
   return { entidades:state.entidades||[], importacoes:state.importacoes||[], lancamentos:state.lancamentos||[],
            regrasCategoria:state.regrasCategoria||[], alertas:state.alertas||[],
-           pastos:state.pastos||[], movimentos:state.movimentos||[], categoriasAnimal:state.categoriasAnimal||null }
+           pastos:state.pastos||[], movimentos:state.movimentos||[], categoriasAnimal:state.categoriasAnimal||null,
+           tema:state.tema||null }
 }
 
 // override: identidade vem do Supabase
@@ -3527,7 +3553,8 @@ async function carregarDados(ws){
   try { const { data } = await sb.from('dados').select('conteudo').eq('workspace', ws).maybeSingle(); c = (data&&data.conteudo)||{} } catch(e){}
   state = { entidades:c.entidades||[], importacoes:c.importacoes||[], lancamentos:c.lancamentos||[],
             usuarios:[], sessao:null, regrasCategoria:c.regrasCategoria||[], alertas:c.alertas||[],
-            pastos:c.pastos||[], movimentos:c.movimentos||[], categoriasAnimal:c.categoriasAnimal||null }
+            pastos:c.pastos||[], movimentos:c.movimentos||[], categoriasAnimal:c.categoriasAnimal||null,
+            tema:c.tema||null }
   filteredLancamentos = [...state.lancamentos]
 }
 
@@ -3996,6 +4023,73 @@ async function salvarCotacao(){
     _cotCache = null
     closeModal(); showView('mercado')
   } catch(e){ erro.textContent='Erro: '+(e.message||e) }
+}
+
+// ============================================================
+// PERSONALIZAÇÃO / WHITE-LABEL (somente suporte)
+// ============================================================
+let _temaLogoNovo = null
+function renderModPersonalizacao(c){
+  if(!ehSuporte()){ c.innerHTML = pageHeader(ICON.lock,'Acesso restrito','Apenas o Suporte Valle edita o layout.'); return }
+  const t = state.tema || {}
+  const cor = t.corPrimaria || '#0c064b'
+  const logoAtual = t.logo || (document.querySelector('.logo img')?.src || '')
+  const ocultos = t.menuHidden || []
+  const menuLinhas = modulosOrdenados().map(m=>`<div class="dre-row" style="align-items:center">
+      <span class="dre-label">${m.icon} ${m.label}${m.suporteOnly?' <span style="font-size:10px;color:#9ca3af">(só suporte)</span>':''}</span>
+      <span class="dre-val" style="gap:6px">
+        <button class="nav-btn" onclick="moverModulo('${m.id}',-1)" title="Subir">↑</button>
+        <button class="nav-btn" onclick="moverModulo('${m.id}',1)" title="Descer">↓</button>
+        ${m.suporteOnly?'':`<label style="font-size:12px;display:inline-flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" ${ocultos.includes(m.id)?'':'checked'} onchange="toggleModulo('${m.id}',this.checked)"> visível</label>`}
+      </span></div>`).join('')
+  c.innerHTML = pageHeader(ICON.tema,'Personalização','Marca e layout — cliente: '+(cloudWs||'')) +
+    `<div class="widget-grid">
+      ${modCard('Identidade visual', `
+        <div class="form-group"><label class="form-label">Nome exibido no topo</label>
+          <input class="form-input" id="tm_nome" value="${(t.nome||'').replace(/"/g,'&quot;')}" placeholder="(vazio = usar só a logo)"></div>
+        <div class="form-group"><label class="form-label">Cor principal</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <input type="color" id="tm_cor" value="${cor}" style="width:48px;height:38px;border:none;background:none;cursor:pointer" oninput="document.getElementById('tm_cor_hex').value=this.value">
+            <input class="form-input" id="tm_cor_hex" value="${cor}" style="max-width:140px" oninput="document.getElementById('tm_cor').value=this.value"></div></div>
+        <div class="form-group"><label class="form-label">Logo</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <img id="tm_logo_prev" src="${logoAtual}" style="height:40px;width:auto;background:#fff;border:1px solid #eee;border-radius:8px;padding:2px">
+            <button class="btn-secondary" onclick="document.getElementById('tm_logo').click()">Trocar logo</button>
+            <input type="file" id="tm_logo" accept="image/*" style="display:none" onchange="previewLogoTema(this.files[0])">
+          </div></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn-primary" onclick="salvarTema()">Salvar e aplicar</button>
+          <button class="btn-secondary" onclick="resetarTema()">Restaurar padrão Valle</button>
+        </div>
+        <p style="font-size:11px;color:#9ca3af;margin-top:8px">As mudanças valem para a empresa <strong>${cloudWs||''}</strong> (white-label por cliente).</p>
+      `)}
+      ${modCard('Ordem e visibilidade do menu', menuLinhas + '<p style="font-size:11px;color:#9ca3af;margin-top:8px">↑↓ reordena os botões. Desmarcar "visível" oculta o módulo para o cliente (o suporte sempre vê tudo).</p>')}
+    </div>`
+}
+function previewLogoTema(file){ if(!file) return; const r=new FileReader(); r.onload=e=>{ _temaLogoNovo=e.target.result; const p=document.getElementById('tm_logo_prev'); if(p)p.src=e.target.result }; r.readAsDataURL(file) }
+function salvarTema(){
+  if(!state.tema) state.tema={}
+  state.tema.nome=document.getElementById('tm_nome').value.trim()||null
+  state.tema.corPrimaria=document.getElementById('tm_cor').value
+  if(_temaLogoNovo){ state.tema.logo=_temaLogoNovo; _temaLogoNovo=null }
+  saveState(); aplicarTema(); buildNav()
+  if(typeof registrarEvento==='function') registrarEvento('estoque','Personalização atualizada')
+  alert('Tema salvo e aplicado para '+(cloudWs||'esta empresa')+'.')
+}
+function resetarTema(){ if(!confirm('Restaurar o visual padrão Valle para esta empresa?')) return; state.tema=null; _temaLogoNovo=null; saveState(); location.reload() }
+function moverModulo(id,dir){
+  const ids=modulosOrdenados().map(m=>m.id)
+  const i=ids.indexOf(id), j=i+dir
+  if(j<0||j>=ids.length) return
+  ;[ids[i],ids[j]]=[ids[j],ids[i]]
+  if(!state.tema) state.tema={}; state.tema.menuOrder=ids
+  saveState(); buildNav(); renderModPersonalizacao(document.getElementById('viewGeneric'))
+}
+function toggleModulo(id,visivel){
+  if(!state.tema) state.tema={}
+  let h=state.tema.menuHidden||[]
+  if(visivel) h=h.filter(x=>x!==id); else if(!h.includes(id)) h.push(id)
+  state.tema.menuHidden=h; saveState(); buildNav()
 }
 
 // ============================================================
