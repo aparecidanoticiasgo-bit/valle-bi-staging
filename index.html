@@ -2341,6 +2341,28 @@ function indicadoresEstoque(){
     cabHa: areaTotal? e.total/areaTotal:0, uaHa: areaTotal? uaTotal/areaTotal:0 }
 }
 
+// Custo por atividade (Onda 3): rateia a despesa do DRE pelos pastos conforme a atividade
+const ATIVIDADES = ['Cria','Recria','Engorda','Lavoura','Outra']
+function custoPorAtividade(){
+  const e=calcEstoque(); const d=dadosAtuais()
+  const ativ={}
+  ;(state.pastos||[]).forEach(p=>{
+    const a=p.atividade||'Não definido'
+    const sp=e.porPasto[p.id]||{total:0}
+    if(!ativ[a]) ativ[a]={cab:0,arrobas:0}
+    ativ[a].cab+=sp.total
+    const pm=pesoMedioPasto(p.id); if(pm>0) ativ[a].arrobas += sp.total*pm/15
+  })
+  const totalCab=Object.values(ativ).reduce((s,x)=>s+x.cab,0)||1
+  const desp=d.despesaTotal
+  const linhas=Object.entries(ativ).filter(([,x])=>x.cab>0).map(([a,x])=>{
+    const aloc=desp*(x.cab/totalCab)
+    return { atividade:a, cab:x.cab, arrobas:x.arrobas, aloc, pct:x.cab/totalCab*100,
+      custoCab:x.cab?aloc/x.cab:0, custoArroba:x.arrobas?aloc/x.arrobas:0 }
+  }).sort((a,b)=>b.cab-a.cab)
+  return { linhas, desp, totalCab }
+}
+
 // Valoração do rebanho (Onda 3): categoria -> produto de mercado
 const VAL_MAP = {
   'Boi':{prod:'boi_gordo',unit:'@',arrobaCab:18}, 'Vaca':{prod:'vaca_gorda',unit:'@',arrobaCab:15},
@@ -2365,7 +2387,7 @@ async function renderModEstoque(c){
   const e = calcEstoque()
   const pastos = state.pastos||[]
   const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;width:fit-content;margin-bottom:16px">
-      ${[['resumo','Resumo'],['pastos','Pastos'],['mapa','Mapa'],['desempenho','Desempenho'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
+      ${[['resumo','Resumo'],['pastos','Pastos'],['mapa','Mapa'],['desempenho','Desempenho'],['custos','Custo/Atividade'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
     </div>`
   let corpo = ''
 
@@ -2457,6 +2479,24 @@ async function renderModEstoque(c){
     })
   }
 
+  else if (estoqueView==='custos') {
+    const ca=custoPorAtividade()
+    const semAtiv = (state.pastos||[]).some(p=>!p.atividade)
+    const linhas = ca.linhas.map(l=>`<div class="dre-row hl" style="align-items:center">
+        <span class="dre-label"><strong>${l.atividade}</strong> <span style="color:#9ca3af;font-weight:400">· ${fmtNum(l.cab)} cab · ${l.pct.toFixed(0)}% do rebanho</span></span>
+        <span class="dre-val" style="gap:14px">
+          <span class="neg">${fmt(l.aloc)}</span>
+          <span style="min-width:90px;text-align:right">${fmt(l.custoCab)}/cab</span>
+          <span style="min-width:90px;text-align:right">${l.custoArroba?fmt(l.custoArroba)+'/@':'—'}</span>
+        </span></div>`).join('')
+    corpo = `<div class="widget-grid">${modCard('Custo por Atividade (rateio do DRE pelo rebanho)', `
+        <div class="dre-row"><span class="dre-label b">Atividade</span><span class="dre-val" style="gap:14px"><span>Custo alocado</span><span style="min-width:90px;text-align:right">Custo/cab</span><span style="min-width:90px;text-align:right">Custo/@</span></span></div>
+        ${linhas || '<p style="color:#9ca3af;font-size:13px">Cadastre pastos com rebanho e defina a <strong>atividade</strong> de cada um.</p>'}
+        <div class="dre-row total"><span class="dre-label b">Despesa total (DRE)</span><span class="dre-val b neg">${fmt(ca.desp)}</span></div>
+        <p style="font-size:11px;color:#9ca3af;margin-top:8px">O custo do DRE é rateado entre as atividades pela <strong>proporção de cabeças</strong> de cada uma. Custo/@ aparece quando há pesagens. ${semAtiv?'⚠️ Há pastos sem atividade definida (entram como "Não definido") — edite os pastos para classificar.':''}</p>
+      `)}</div>`
+  }
+
   else { // movimentos
     const movs = (state.movimentos||[]).slice().sort((a,b)=>(a.data<b.data?1:-1)).slice(0,100)
     const nomePasto = id => (state.pastos||[]).find(p=>p.id===id)?.nome || '—'
@@ -2482,7 +2522,11 @@ function editarPasto(id){
   document.getElementById('modalOverlay').classList.remove('hidden')
   document.getElementById('modalBody').innerHTML = `
     <input type="hidden" id="pa_id" value="${p.id}">
-    <div class="form-group"><label class="form-label">Nome do pasto</label><input class="form-input" id="pa_nome" value="${(p.nome||'').replace(/"/g,'&quot;')}"></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Nome do pasto</label><input class="form-input" id="pa_nome" value="${(p.nome||'').replace(/"/g,'&quot;')}"></div>
+      <div class="form-group"><label class="form-label">Atividade</label>
+        <select class="form-input" id="pa_ativ">${['','Cria','Recria','Engorda','Lavoura','Outra'].map(a=>`<option value="${a}" ${(p.atividade||'')===a?'selected':''}>${a||'— definir —'}</option>`).join('')}</select></div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
       <div class="form-group"><label class="form-label">Área total (ha)</label><input class="form-input" id="pa_ha" type="number" step="any" value="${p.areaHa||''}"></div>
       <div class="form-group"><label class="form-label">Área útil (ha)</label><input class="form-input" id="pa_hu" type="number" step="any" value="${p.areaUtil||''}"></div>
@@ -2497,7 +2541,7 @@ function salvarPasto(){
   const nome=document.getElementById('pa_nome').value.trim()
   if(!nome){ document.getElementById('pa_erro').textContent='Informe o nome.'; return }
   if(!state.pastos) state.pastos=[]
-  const obj={ nome, areaHa:parseFloat(document.getElementById('pa_ha').value)||0, areaUtil:parseFloat(document.getElementById('pa_hu').value)||0, capacidade:parseFloat(document.getElementById('pa_cap').value)||0, obs:document.getElementById('pa_obs').value.trim() }
+  const obj={ nome, atividade:document.getElementById('pa_ativ').value, areaHa:parseFloat(document.getElementById('pa_ha').value)||0, areaUtil:parseFloat(document.getElementById('pa_hu').value)||0, capacidade:parseFloat(document.getElementById('pa_cap').value)||0, obs:document.getElementById('pa_obs').value.trim() }
   if(id){ Object.assign(state.pastos.find(p=>p.id===id), obj) }
   else { obj.id='pa_'+Math.random().toString(36).slice(2); state.pastos.push(obj) }
   saveState(); closeModal(); renderModEstoque(document.getElementById('viewGeneric'))
