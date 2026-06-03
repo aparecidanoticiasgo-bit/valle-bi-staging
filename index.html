@@ -4199,27 +4199,47 @@ async function renderModMercado(c){
     ${!d.totalArrobas?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Importe planilha com arrobas para calcular o valor do rebanho.</p>':''}
   `)
 
-  // valor da produção agrícola (sacas × preço; reavalia soja/milho pela cotação quando houver)
+  // valor da produção agrícola POR CULTURA (reavalia soja/milho pela cotação CEPEA quando houver)
   const ag = agroResumo()
   const cotProd = id => { const h = rows.filter(r=>r.produto===id).sort((x,y)=>(x.data<y.data?1:-1))[0]; return h?h.valor:0 }
   const cotSoja = cotProd('soja'), cotMilho = cotProd('milho')
-  let valorMercado = 0, usouMercado = false
-  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{
-    const sc = Number(s.sacas)||0, cult = (s.cultura||'').toLowerCase()
-    let preco = Number(s.preco)||0
-    if (cult==='soja'  && cotSoja){  preco = cotSoja;  usouMercado = true }
-    if (cult==='milho' && cotMilho){ preco = cotMilho; usouMercado = true }
-    valorMercado += sc*preco
-  }) })
+  const cultAgro = agroPorCultura()
+  let totCad = 0, totMerc = 0, usouMercado = false
+  const linhasAgro = cultAgro.map(c=>{
+    const un = c.sc>0 ? 'sc' : (c.kg>0 ? 'kg' : 'sc')
+    const qtd = un==='kg' ? c.kg : c.sc
+    const prodTxt = (c.sc>0 && c.kg>0) ? `${fmtNum(c.sc)} sc + ${fmtNum(c.kg)} kg` : `${fmtNum(qtd)} ${un}`
+    const nome = (c.cultura||'').toLowerCase()
+    let vMerc = c.receita, flag = false
+    if (nome==='soja'  && cotSoja){  vMerc = c.sc*cotSoja;  flag = true; usouMercado = true }
+    else if (nome==='milho' && cotMilho){ vMerc = c.sc*cotMilho; flag = true; usouMercado = true }
+    totCad += c.receita; totMerc += vMerc
+    return `<tr>
+      <td style="padding:6px 6px;font-weight:600">${escapeHtml(c.cultura)}</td>
+      <td style="padding:6px 6px;text-align:right;color:#6b7280">${fmtNum(c.area)} ha</td>
+      <td style="padding:6px 6px;text-align:right">${prodTxt}</td>
+      <td style="padding:6px 6px;text-align:right">${c.receita?fmt(c.receita):'—'}</td>
+      <td style="padding:6px 6px;text-align:right;color:#16a34a;font-weight:600">${vMerc?fmt(vMerc):'—'}${flag?' <span title="reavaliado pela cotação CEPEA" style="color:#9ca3af;cursor:help">•</span>':''}</td>
+    </tr>`
+  }).join('')
   const agroCard = modCard('Valor da Produção Agrícola', `
-    <div class="kpi-grid">
+    <div class="kpi-grid" style="margin-bottom:12px">
       <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(ag.area)} <span style="font-size:11px;color:#9ca3af">ha</span></div></div>
-      <div class="kpi"><div class="kpi-label">Produção</div><div class="kpi-value">${(ag.sacas>0&&ag.kg>0)?(fmtNum(ag.sacas)+' <span style="font-size:11px;color:#9ca3af">sc</span> + '+fmtNum(ag.kg)+' <span style="font-size:11px;color:#9ca3af">kg</span>'):((ag.kg>0)?(fmtNum(ag.kg)+' <span style="font-size:11px;color:#9ca3af">kg</span>'):(fmtNum(ag.sacas)+' <span style="font-size:11px;color:#9ca3af">sc</span>'))}</div></div>
-      <div class="kpi"><div class="kpi-label">Valor (preço cadastrado)</div><div class="kpi-value pos">${ag.receitaEst?fmt(ag.receitaEst):'—'}</div></div>
-      <div class="kpi"><div class="kpi-label">Valor a mercado</div><div class="kpi-value pos">${valorMercado?fmt(valorMercado):'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Valor (preço cadastrado)</div><div class="kpi-value pos">${totCad?fmt(totCad):'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Valor a mercado</div><div class="kpi-value pos">${totMerc?fmt(totMerc):'—'}</div></div>
     </div>
-    ${ag.area<=0?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Cadastre safras no módulo Agricultura para calcular.</p>':''}
-    ${usouMercado?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Soja/Milho reavaliados pela cotação atual; demais culturas pelo preço cadastrado.</p>':''}
+    ${ag.area<=0 ? '<p style="font-size:12px;color:#9ca3af">Cadastre safras no módulo Agricultura para calcular.</p>' : `
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="color:#9ca3af;font-size:10px;text-transform:uppercase;border-bottom:1px solid #ececf0">
+        <th style="text-align:left;padding:4px 6px">Cultura</th>
+        <th style="text-align:right;padding:4px 6px">Área</th>
+        <th style="text-align:right;padding:4px 6px">Produção</th>
+        <th style="text-align:right;padding:4px 6px">Valor cadastrado</th>
+        <th style="text-align:right;padding:4px 6px">Valor a mercado</th>
+      </tr></thead>
+      <tbody>${linhasAgro}</tbody>
+    </table></div>`}
+    ${usouMercado?'<p style="font-size:11px;color:#9ca3af;margin-top:8px">• Soja/Milho reavaliados pela cotação CEPEA atual; demais culturas pelo preço cadastrado.</p>':''}
   `)
 
   // cotações oficiais CEPEA/ESALQ ao vivo (usuário escolhe produto + estado/praça)
