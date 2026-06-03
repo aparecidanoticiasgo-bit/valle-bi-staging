@@ -1614,9 +1614,23 @@ function calcular(lancamentos) {
     }
   }
 
-  const temPecuaria = lancamentos.some(l=>l.cabecas||l.arrobas)
-  const totalCabecas = lancamentos.reduce((s,l)=>s+(l.cabecas||0),0)
-  const totalArrobas = lancamentos.reduce((s,l)=>s+(l.arrobas||0),0)
+  const temPecuariaPlan = lancamentos.some(l=>l.cabecas||l.arrobas)
+  const cabecasPlan = lancamentos.reduce((s,l)=>s+(l.cabecas||0),0)
+  const arrobasPlan = lancamentos.reduce((s,l)=>s+(l.arrobas||0),0)
+  // FONTE ÚNICA DE VERDADE do rebanho: Estoque Animal manda; planilha só como fallback
+  let totalCabecas = cabecasPlan, totalArrobas = arrobasPlan, cabecasFonte = 'planilha'
+  try {
+    if (typeof calcEstoque === 'function') {
+      const est = calcEstoque()
+      if (est.total > 0) {
+        totalCabecas = est.total; cabecasFonte = 'estoque'
+        let arr = 0
+        ;(state.pastos||[]).forEach(p=>{ const sp=est.porPasto[p.id]||{total:0}; const pm=(typeof pesoMedioPasto==='function')?pesoMedioPasto(p.id):0; if(pm>0) arr += sp.total*pm/15 })
+        if (arr > 0) totalArrobas = arr
+      }
+    }
+  } catch(e){}
+  const temPecuaria = temPecuariaPlan || totalCabecas > 0
 
   // Contas a receber / a pagar (lançamentos com situação PENDENTE)
   const temSituacao = lancamentos.some(l=>l.situacao)
@@ -1638,7 +1652,7 @@ function calcular(lancamentos) {
 
   return { receitaTotal, despesaTotal, resultado, margem, ebitda:resultado,
     porCategoriaDes, porCategoriaRec, porFazenda, porCC, porMes,
-    temPecuaria, totalCabecas, totalArrobas,
+    temPecuaria, totalCabecas, totalArrobas, cabecasFonte,
     custoPorCabeca: totalCabecas ? despesaTotal/totalCabecas : 0,
     receitaPorArroba: totalArrobas ? receitaTotal/totalArrobas : 0,
     temSituacao, aReceber, aPagar, recebido, pago,
@@ -2015,7 +2029,7 @@ const KPI_DEFS = [
   { id:'custoCabeca', label:'Custo / Cabeça',     tipo:'currency', raw:d=>d.custoPorCabeca, get:d=>({v:fmt(d.custoPorCabeca), cls:'neg'}) },
   { id:'receitaArroba',label:'Receita / Arroba',  tipo:'currency', raw:d=>d.receitaPorArroba, get:d=>({v:fmt(d.receitaPorArroba), cls:'pos'}) },
   { id:'custoArroba', label:'Custo / Arroba',     tipo:'currency', raw:d=>d.totalArrobas?d.despesaTotal/d.totalArrobas:0, get:d=>({v:fmt(d.totalArrobas?d.despesaTotal/d.totalArrobas:0), cls:'neg'}) },
-  { id:'cabecas',     label:'Total de Cabeças',   tipo:'number',   raw:d=>d.totalCabecas, get:d=>({v:fmtNum(d.totalCabecas), cls:'blue'}) },
+  { id:'cabecas',     label:'Total de Cabeças',   tipo:'number',   raw:d=>d.totalCabecas, get:d=>({v:fmtNum(d.totalCabecas), cls:'blue', sub:d.cabecasFonte==='estoque'?'fonte: Estoque Animal':'fonte: planilha'}) },
   { id:'arrobas',     label:'Total de Arrobas',   tipo:'number',   raw:d=>d.totalArrobas, get:d=>({v:fmtNum(d.totalArrobas), cls:'yellow'}) },
 ]
 const KPI_KEY = 'dre_kpis_v1'
