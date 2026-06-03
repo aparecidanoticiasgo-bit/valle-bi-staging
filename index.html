@@ -2341,8 +2341,27 @@ function indicadoresEstoque(){
     cabHa: areaTotal? e.total/areaTotal:0, uaHa: areaTotal? uaTotal/areaTotal:0 }
 }
 
-function renderModEstoque(c){
-  if(!ehAdmin() && !(usuarioAtual()?.permissoes||[]).includes('estoque')) {}
+// Valoração do rebanho (Onda 3): categoria -> produto de mercado
+const VAL_MAP = {
+  'Boi':{prod:'boi_gordo',unit:'@',arrobaCab:18}, 'Vaca':{prod:'vaca_gorda',unit:'@',arrobaCab:15},
+  'Touro':{prod:'boi_gordo',unit:'@',arrobaCab:22}, 'Novilha':{prod:'novilha',unit:'cab'},
+  'Garrote':{prod:'garrote',unit:'cab'}, 'Bezerro M':{prod:'bezerro',unit:'cab'}, 'Bezerro F':{prod:'bezerro',unit:'cab'},
+  'HB-Novilha':{prod:'novilha',unit:'cab'}, 'HB-Garrote':{prod:'garrote',unit:'cab'}
+}
+let _cotCache = null
+async function getCotacoes(){ if(_cotCache) return _cotCache; try{ const {data}=await sb.from('cotacoes').select('*').order('data',{ascending:false}); _cotCache=data||[] }catch(e){ _cotCache=[] } return _cotCache }
+function cotacaoDe(cots,prod){ const h=(cots||[]).filter(r=>r.produto===prod).sort((a,b)=>(a.data<b.data?1:-1)); return h[0]?Number(h[0].valor):0 }
+function valorRebanho(cots){
+  const e=calcEstoque(); let total=0; const linhas=[]
+  e.cats.forEach(cat=>{ const n=e.porCategoria[cat]; if(!n) return
+    const map=VAL_MAP[cat]; const cot=map?cotacaoDe(cots,map.prod):0; let val=0,base='sem cotação'
+    if(cot && map){ if(map.unit==='@'){ val=n*map.arrobaCab*cot; base=`${n} × ${map.arrobaCab}@ × ${fmt(cot)}` } else { val=n*cot; base=`${n} × ${fmt(cot)}/cab` } }
+    total+=val; linhas.push({cat,n,val,base})
+  })
+  return {total,linhas}
+}
+
+async function renderModEstoque(c){
   const e = calcEstoque()
   const pastos = state.pastos||[]
   const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;width:fit-content;margin-bottom:16px">
@@ -2351,14 +2370,19 @@ function renderModEstoque(c){
   let corpo = ''
 
   if (estoqueView==='resumo') {
+    const cots = await getCotacoes()
+    const vr = valorRebanho(cots)
     const kpis = `<div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">Total de Cabeças</div><div class="kpi-value">${fmtNum(e.total)}</div></div>
       <div class="kpi"><div class="kpi-label">Pastos</div><div class="kpi-value blue">${pastos.length}</div></div>
+      <div class="kpi"><div class="kpi-label">Patrimônio do Rebanho</div><div class="kpi-value pos">${vr.total?fmt(vr.total):'—'}</div><div class="kpi-sub">a preço de mercado</div></div>
       ${e.cats.filter(cat=>e.porCategoria[cat]>0).map(cat=>`<div class="kpi"><div class="kpi-label">${cat}</div><div class="kpi-value">${fmtNum(e.porCategoria[cat])}</div></div>`).join('')}
     </div>`
+    const valLinhas = vr.linhas.map(l=>`<div class="dre-row"><span class="dre-label">${l.cat} <span style="color:#9ca3af;font-weight:400">· ${l.base}</span></span><span class="dre-val ${l.val?'pos':''}">${l.val?fmt(l.val):'—'}</span></div>`).join('')
     corpo = `<div class="widget-grid">
       ${modCard('Rebanho por categoria', kpis)}
       ${modCard('Composição', `<div class="chart-wrap"><canvas id="cEstoqueCat"></canvas></div>`)}
+      ${modCard('Patrimônio do Rebanho (preço de mercado)', valLinhas + `<div class="dre-row total"><span class="dre-label b">Total</span><span class="dre-val b pos">${fmt(vr.total)}</span></div>` + `<p style="font-size:11px;color:#9ca3af;margin-top:8px">Boi/Vaca avaliados por @ (premissa de @/cabeça); bezerro/garrote/novilha por cabeça. Cadastre as cotações em <strong>Mercado</strong>. ${vr.total?'':'— nenhuma cotação cadastrada ainda.'}</p>`)}
     </div>`
     requestAnimationFrame(()=>{
       const ent=e.cats.filter(cat=>e.porCategoria[cat]>0)
@@ -3803,6 +3827,7 @@ async function salvarCotacao(){
   try {
     const { error } = await sb.from('cotacoes').upsert({ produto, rotulo, estado, unidade, valor, data, fonte }, { onConflict:'produto,estado,data' })
     if(error) throw error
+    _cotCache = null
     closeModal(); showView('mercado')
   } catch(e){ erro.textContent='Erro: '+(e.message||e) }
 }
