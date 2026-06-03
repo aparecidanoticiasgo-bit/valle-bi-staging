@@ -1713,6 +1713,20 @@ function agroResumo(){
   ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{ const q=Number(s.sacas)||0, un=(s.unidade||'sc'); area+=Number(s.ha)||0; if(un==='kg') kg+=q; else sacas+=q; custo+=Number(s.custo)||0; receitaEst+=q*(Number(s.preco)||0); culturas++ }) })
   return { area, sacas, kg, custo, receitaEst, culturas }
 }
+// Agrega a safra por CULTURA (somando todas as fazendas) — produção/produtividade são por cultura
+function agroPorCultura(){
+  const map = {}
+  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{
+    const cult = (s.cultura||'Outra'), un = (s.unidade||'sc'), q = Number(s.sacas)||0
+    if(!map[cult]) map[cult] = { cultura:cult, area:0, sc:0, kg:0, custo:0, receita:0 }
+    const m = map[cult]
+    m.area += Number(s.ha)||0
+    if(un==='kg') m.kg += q; else m.sc += q
+    m.custo += Number(s.custo)||0
+    m.receita += q*(Number(s.preco)||0)
+  }) })
+  return Object.values(map).filter(m=>m.area>0||m.sc>0||m.kg>0).sort((a,b)=> b.receita - a.receita)
+}
 
 // ============================================================
 // PREFERÊNCIAS POR USUÁRIO (salvas na nuvem — seguem o login em qualquer dispositivo)
@@ -2300,20 +2314,39 @@ function htmlPecuaria(d) {
 
 function htmlAgro(d) {
   const a = agroResumo()
-  const un = a.sacas>0 ? 'sc' : (a.kg>0 ? 'kg' : 'sc')
-  const qtdProd = un==='kg' ? a.kg : a.sacas
-  const prod   = a.area>0 ? qtdProd/a.area : 0   // produção por hectare na unidade predominante
-  const custoHa= a.area>0 ? a.custo/a.area : 0
   const margem = a.receitaEst - a.custo
-  const prodTxt = (a.sacas>0 && a.kg>0) ? `${fmtNum(a.sacas)} <span style="font-size:13px;color:#9ca3af">sc</span> + ${fmtNum(a.kg)} <span style="font-size:13px;color:#9ca3af">kg</span>` : `${fmtNum(qtdProd)} <span style="font-size:13px;color:#9ca3af">${un}</span>`
-  return `<div class="kpi-grid">
-    <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(a.area)} <span style="font-size:13px;color:#9ca3af">ha</span></div></div>
-    <div class="kpi"><div class="kpi-label">Produtividade</div><div class="kpi-value yellow">${prod.toFixed(1)} <span style="font-size:13px;color:#9ca3af">${un}/ha</span></div></div>
-    <div class="kpi"><div class="kpi-label">Custo / ha</div><div class="kpi-value neg">${fmt(custoHa)}</div></div>
-    <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${fmt(a.receitaEst)}</div></div>
-    <div class="kpi"><div class="kpi-label">Margem Estimada</div><div class="kpi-value ${margem>=0?'pos':'neg'}">${fmt(margem)}</div></div>
-    <div class="kpi"><div class="kpi-label">Produção Total</div><div class="kpi-value">${prodTxt}</div></div>
-  </div>`
+  const porCult = agroPorCultura()
+  const linhas = porCult.map(c=>{
+    const un = c.sc>0 ? 'sc' : (c.kg>0 ? 'kg' : 'sc')
+    const qtd = un==='kg' ? c.kg : c.sc
+    const prod = c.area>0 ? qtd/c.area : 0
+    const prodTxt = (c.sc>0 && c.kg>0) ? `${fmtNum(c.sc)} sc + ${fmtNum(c.kg)} kg` : `${fmtNum(qtd)} ${un}`
+    return `<tr>
+      <td style="padding:6px 6px;font-weight:600;color:#1d1d1f">${escapeHtml(c.cultura)}</td>
+      <td style="padding:6px 6px;text-align:right;color:#6b7280">${fmtNum(c.area)} ha</td>
+      <td style="padding:6px 6px;text-align:right">${prodTxt}</td>
+      <td style="padding:6px 6px;text-align:right;color:#0c064b;font-weight:700">${prod?prod.toFixed(1):'—'} ${un}/ha</td>
+      <td style="padding:6px 6px;text-align:right;color:#16a34a">${c.receita?fmt(c.receita):'—'}</td>
+    </tr>`
+  }).join('')
+  return `<div class="kpi-grid" style="margin-bottom:12px">
+      <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(a.area)} <span style="font-size:13px;color:#9ca3af">ha</span></div></div>
+      <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${fmt(a.receitaEst)}</div></div>
+      <div class="kpi"><div class="kpi-label">Margem Estimada</div><div class="kpi-value ${margem>=0?'pos':'neg'}">${fmt(margem)}</div></div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="color:#9ca3af;font-size:10px;text-transform:uppercase;border-bottom:1px solid #ececf0">
+          <th style="text-align:left;padding:4px 6px">Cultura</th>
+          <th style="text-align:right;padding:4px 6px">Área</th>
+          <th style="text-align:right;padding:4px 6px">Produção</th>
+          <th style="text-align:right;padding:4px 6px">Produtiv.</th>
+          <th style="text-align:right;padding:4px 6px">Receita est.</th>
+        </tr></thead>
+        <tbody>${linhas || '<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Cadastre culturas no módulo Agricultura.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:#9ca3af;margin-top:8px">Produção e produtividade são por cultura (a produtividade por hectare varia entre soja, milho, gergelim, etc.).</p>`
 }
 
 // ============================================================
