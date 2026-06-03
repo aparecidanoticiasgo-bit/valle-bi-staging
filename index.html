@@ -2252,10 +2252,224 @@ function renderModCaixa(c) {
 // ============================================================
 // MÓDULO: ESTOQUE ANIMAL (placeholder estruturado)
 // ============================================================
-function renderModEstoque(c) {
-  c.innerHTML = pageHeader(ICON.estoque,'Estoque Animal','Evolução do rebanho, movimentações e categorias') +
-    `<div class="widget-grid">${modCard('Em construção',
-      `<p style="font-size:13px;color:#6b7280;line-height:1.7">Este módulo controlará categorias do rebanho (bezerro, garrote, novilha, boi gordo, vaca), quantidade, peso médio e arrobas — com compras, vendas e mortalidade.<br><br>Será habilitado na próxima etapa, conectado ao cadastro de entidades e às planilhas de movimentação animal.</p>`)}</div>`
+// ===== ESTOQUE ANIMAL (Onda 1: pastos + movimentações + saldo automático) =====
+const CAT_ANIMAL_PADRAO = ['Vaca','Novilha','Bezerro M','Bezerro F','Garrote','Boi','Touro','HB-Novilha','HB-Garrote']
+function catsAnimal(){ return (state.categoriasAnimal && state.categoriasAnimal.length) ? state.categoriasAnimal : CAT_ANIMAL_PADRAO }
+const MOV_ENTRADA = ['saldo_inicial','compra','nascimento','entrada']
+const MOV_SAIDA = ['venda','morte','saida']
+const MOV_LABEL = { saldo_inicial:'Saldo inicial', compra:'Compra', nascimento:'Nascimento', entrada:'Entrada', venda:'Venda', morte:'Morte', saida:'Saída', transferencia:'Transferência' }
+let estoqueView = 'resumo'
+
+function calcEstoque(){
+  const cats = catsAnimal()
+  const porCategoria = {}; const porPasto = {}
+  cats.forEach(c=>porCategoria[c]=0)
+  const novo = pid => { porPasto[pid]={total:0}; cats.forEach(c=>porPasto[pid][c]=0); return porPasto[pid] }
+  ;(state.pastos||[]).forEach(p=>novo(p.id))
+  const add = (pid,cat,q)=>{ if(!pid) return; if(!porPasto[pid]) novo(pid); porPasto[pid][cat]=(porPasto[pid][cat]||0)+q; porPasto[pid].total+=q; if(porCategoria[cat]===undefined)porCategoria[cat]=0; porCategoria[cat]+=q }
+  ;(state.movimentos||[]).forEach(m=>{
+    const q=Number(m.qtd)||0, cat=m.categoria
+    if(m.tipo==='transferencia'){ add(m.pastoId,cat,-q); add(m.pastoDestinoId,cat,q) }
+    else if(MOV_SAIDA.includes(m.tipo)){ add(m.pastoId,cat,-q) }
+    else { add(m.pastoId,cat,q) }
+  })
+  const total=Object.values(porCategoria).reduce((s,v)=>s+v,0)
+  return { cats, porCategoria, porPasto, total }
+}
+
+function renderModEstoque(c){
+  if(!ehAdmin() && !(usuarioAtual()?.permissoes||[]).includes('estoque')) {}
+  const e = calcEstoque()
+  const pastos = state.pastos||[]
+  const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;width:fit-content;margin-bottom:16px">
+      ${[['resumo','Resumo'],['pastos','Pastos'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
+    </div>`
+  let corpo = ''
+
+  if (estoqueView==='resumo') {
+    const kpis = `<div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Total de Cabeças</div><div class="kpi-value">${fmtNum(e.total)}</div></div>
+      <div class="kpi"><div class="kpi-label">Pastos</div><div class="kpi-value blue">${pastos.length}</div></div>
+      ${e.cats.filter(cat=>e.porCategoria[cat]>0).map(cat=>`<div class="kpi"><div class="kpi-label">${cat}</div><div class="kpi-value">${fmtNum(e.porCategoria[cat])}</div></div>`).join('')}
+    </div>`
+    corpo = `<div class="widget-grid">
+      ${modCard('Rebanho por categoria', kpis)}
+      ${modCard('Composição', `<div class="chart-wrap"><canvas id="cEstoqueCat"></canvas></div>`)}
+    </div>`
+    requestAnimationFrame(()=>{
+      const ent=e.cats.filter(cat=>e.porCategoria[cat]>0)
+      initChart('cEstoqueCat','doughnut',
+        {labels:ent,datasets:[{data:ent.map(cat=>e.porCategoria[cat]),backgroundColor:CORES,borderWidth:2,borderColor:'#fff'}]},
+        {plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:10}}}})
+    })
+  }
+
+  else if (estoqueView==='pastos') {
+    const linhas = pastos.map(p=>{
+      const sp=e.porPasto[p.id]||{total:0}
+      const ha=Number(p.areaHa)||0
+      const cabHa = ha? (sp.total/ha).toFixed(2)+' cab/ha':'—'
+      const det = e.cats.filter(cat=>sp[cat]>0).map(cat=>`${cat}: ${sp[cat]}`).join(' · ') || 'vazio'
+      return `<div class="dre-row" style="align-items:center">
+        <span class="dre-label"><strong>${p.nome}</strong> <span style="color:#9ca3af;font-weight:400">· ${ha?ha+' ha · ':''}${det}</span></span>
+        <span class="dre-val" style="gap:10px"><span>${fmtNum(sp.total)} cab</span><span style="color:#9ca3af;font-size:11px">${cabHa}</span>
+          <button class="nav-btn" onclick="editarPasto('${p.id}')">Editar</button>
+          <button class="nav-btn" style="color:#dc2626" onclick="excluirPasto('${p.id}')">✕</button></span></div>`
+    }).join('')
+    corpo = `<div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn-primary" onclick="editarPasto()">+ Novo Pasto</button>
+        <button class="btn-secondary" onclick="document.getElementById('impEstoque').click()">⬆ Importar saldo (Excel)</button>
+        <input type="file" id="impEstoque" accept=".xlsx,.xls,.csv" style="display:none" onchange="importarSaldoEstoque(this.files[0])">
+      </div>
+      <div class="widget-grid">${modCard('Pastos e saldo atual', linhas || '<p style="color:#9ca3af;font-size:13px">Nenhum pasto. Cadastre ou importe do Excel.</p>')}</div>`
+  }
+
+  else { // movimentos
+    const movs = (state.movimentos||[]).slice().sort((a,b)=>(a.data<b.data?1:-1)).slice(0,100)
+    const nomePasto = id => (state.pastos||[]).find(p=>p.id===id)?.nome || '—'
+    const linhas = movs.map(m=>{
+      const ent = !MOV_SAIDA.includes(m.tipo) && m.tipo!=='transferencia'
+      const cor = m.tipo==='transferencia'?'#2563eb':(ent?'#16a34a':'#dc2626')
+      const rota = m.tipo==='transferencia'? `${nomePasto(m.pastoId)} → ${nomePasto(m.pastoDestinoId)}` : nomePasto(m.pastoId)
+      return `<div class="dre-row" style="align-items:center">
+        <span class="dre-label"><span style="font-size:10px;font-weight:700;color:#fff;background:${cor};padding:1px 7px;border-radius:99px">${MOV_LABEL[m.tipo]||m.tipo}</span>
+          <strong style="margin-left:6px">${m.categoria}</strong> <span style="color:#9ca3af;font-weight:400">· ${m.qtd} cab · ${rota}${m.peso?' · '+m.peso+'kg':''}${m.obs?' · '+m.obs:''}</span></span>
+        <span class="dre-val" style="color:#6b7280;font-weight:600">${m.data?fmtDataCot(m.data):''} <button class="nav-btn" style="color:#dc2626" onclick="excluirMovimento('${m.id}')">✕</button></span></div>`
+    }).join('')
+    corpo = `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novaMovimentacao()">+ Lançar Movimentação</button></div>
+      <div class="widget-grid">${modCard('Movimentações (últimas 100)', linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma movimentação ainda.</p>')}</div>`
+  }
+
+  c.innerHTML = pageHeader(ICON.estoque,'Estoque Animal','Rebanho por pasto e categoria — saldo automático') + tabs + corpo
+}
+
+function editarPasto(id){
+  const p = id ? (state.pastos||[]).find(x=>x.id===id) : {id:'',nome:'',areaHa:'',areaUtil:'',capacidade:'',obs:''}
+  document.getElementById('modalTitle').textContent = id?'Editar Pasto':'Novo Pasto'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <input type="hidden" id="pa_id" value="${p.id}">
+    <div class="form-group"><label class="form-label">Nome do pasto</label><input class="form-input" id="pa_nome" value="${(p.nome||'').replace(/"/g,'&quot;')}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Área total (ha)</label><input class="form-input" id="pa_ha" type="number" step="any" value="${p.areaHa||''}"></div>
+      <div class="form-group"><label class="form-label">Área útil (ha)</label><input class="form-input" id="pa_hu" type="number" step="any" value="${p.areaUtil||''}"></div>
+      <div class="form-group"><label class="form-label">Capacidade (cab)</label><input class="form-input" id="pa_cap" type="number" step="any" value="${p.capacidade||''}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Observação</label><input class="form-input" id="pa_obs" value="${(p.obs||'').replace(/"/g,'&quot;')}"></div>
+    <div id="pa_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="salvarPasto()">Salvar</button>`
+}
+function salvarPasto(){
+  const id=document.getElementById('pa_id').value
+  const nome=document.getElementById('pa_nome').value.trim()
+  if(!nome){ document.getElementById('pa_erro').textContent='Informe o nome.'; return }
+  if(!state.pastos) state.pastos=[]
+  const obj={ nome, areaHa:parseFloat(document.getElementById('pa_ha').value)||0, areaUtil:parseFloat(document.getElementById('pa_hu').value)||0, capacidade:parseFloat(document.getElementById('pa_cap').value)||0, obs:document.getElementById('pa_obs').value.trim() }
+  if(id){ Object.assign(state.pastos.find(p=>p.id===id), obj) }
+  else { obj.id='pa_'+Math.random().toString(36).slice(2); state.pastos.push(obj) }
+  saveState(); closeModal(); renderModEstoque(document.getElementById('viewGeneric'))
+}
+function excluirPasto(id){
+  if(!confirm('Excluir este pasto? As movimentações dele permanecem no histórico.')) return
+  state.pastos=(state.pastos||[]).filter(p=>p.id!==id); saveState(); renderModEstoque(document.getElementById('viewGeneric'))
+}
+
+function novaMovimentacao(){
+  const pastos=state.pastos||[]
+  if(!pastos.length){ alert('Cadastre ao menos um pasto antes de lançar movimentação.'); estoqueView='pastos'; renderModEstoque(document.getElementById('viewGeneric')); return }
+  const optP=pastos.map(p=>`<option value="${p.id}">${p.nome}</option>`).join('')
+  const optC=catsAnimal().map(cat=>`<option>${cat}</option>`).join('')
+  document.getElementById('modalTitle').textContent='Lançar Movimentação'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-input" id="mv_tipo" onchange="document.getElementById('mv_dest_wrap').style.display=this.value==='transferencia'?'block':'none'">
+          <option value="saldo_inicial">Saldo inicial</option><option value="compra">Compra</option><option value="nascimento">Nascimento</option>
+          <option value="transferencia">Transferência entre pastos</option><option value="venda">Venda</option><option value="morte">Morte</option>
+        </select></div>
+      <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="mv_data" type="date" value="${new Date().toISOString().substring(0,10)}"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Categoria</label><select class="form-input" id="mv_cat">${optC}</select></div>
+      <div class="form-group"><label class="form-label">Quantidade (cabeças)</label><input class="form-input" id="mv_qtd" type="number" step="1"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Pasto (origem)</label><select class="form-input" id="mv_pasto">${optP}</select></div>
+      <div class="form-group" id="mv_dest_wrap" style="display:none"><label class="form-label">Pasto destino</label><select class="form-input" id="mv_dest">${optP}</select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px">
+      <div class="form-group"><label class="form-label">Peso médio (kg)</label><input class="form-input" id="mv_peso" type="number" step="any" placeholder="Opcional"></div>
+      <div class="form-group"><label class="form-label">Observação</label><input class="form-input" id="mv_obs" placeholder="Opcional"></div>
+    </div>
+    <div id="mv_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="salvarMovimentacao()">Salvar movimentação</button>`
+}
+function salvarMovimentacao(){
+  const tipo=document.getElementById('mv_tipo').value
+  const qtd=parseInt(document.getElementById('mv_qtd').value)
+  const erro=document.getElementById('mv_erro')
+  if(isNaN(qtd)||qtd<=0){ erro.textContent='Informe a quantidade.'; return }
+  if(!state.movimentos) state.movimentos=[]
+  const m={ id:'mv_'+Math.random().toString(36).slice(2), data:document.getElementById('mv_data').value||null,
+    tipo, categoria:document.getElementById('mv_cat').value, qtd,
+    pastoId:document.getElementById('mv_pasto').value,
+    pastoDestinoId: tipo==='transferencia'?document.getElementById('mv_dest').value:null,
+    peso:parseFloat(document.getElementById('mv_peso').value)||null, obs:document.getElementById('mv_obs').value.trim() }
+  if(tipo==='transferencia' && m.pastoId===m.pastoDestinoId){ erro.textContent='Origem e destino devem ser diferentes.'; return }
+  state.movimentos.push(m)
+  saveState()
+  if(typeof registrarEvento==='function') registrarEvento('estoque', `${MOV_LABEL[tipo]} ${qtd} ${m.categoria}`)
+  closeModal(); renderModEstoque(document.getElementById('viewGeneric'))
+}
+function excluirMovimento(id){
+  if(!confirm('Excluir esta movimentação? O saldo será recalculado.')) return
+  state.movimentos=(state.movimentos||[]).filter(m=>m.id!==id); saveState(); renderModEstoque(document.getElementById('viewGeneric'))
+}
+
+// Importar saldo inicial de uma planilha tipo "Resumo Pastos" (linha por pasto, colunas por categoria)
+function importarSaldoEstoque(file){
+  if(!file) return
+  const r=new FileReader()
+  r.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'})
+      // procura aba com 'Pasto' no cabeçalho
+      let rows=null
+      for(const n of wb.SheetNames){
+        const rr=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,defval:''})
+        if(rr.some(row=>row.some(c=>String(c).toLowerCase().trim()==='pasto'))){ rows=rr; break }
+      }
+      if(!rows) rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''})
+      // localizar linha de cabeçalho (a que tem 'Pasto')
+      const hi=rows.findIndex(row=>row.some(c=>String(c).toLowerCase().trim()==='pasto'))
+      if(hi<0) throw new Error('Não achei a coluna "Pasto" na planilha.')
+      const head=rows[hi].map(c=>String(c).trim())
+      const colPasto=head.findIndex(c=>c.toLowerCase()==='pasto')
+      // mapear colunas de categoria conhecidas
+      const MAP={'vaca':'Vaca','vaca p+':'Vaca','vaca p-':'Vaca','novilha':'Novilha','bz m':'Bezerro M','bz f':'Bezerro F','bezerro m':'Bezerro M','bezerro f':'Bezerro F','garrote':'Garrote','boi':'Boi','touro':'Touro','hb- novilha':'HB-Novilha','hb-novilha':'HB-Novilha'}
+      const colCats=[]
+      head.forEach((h,idx)=>{ const k=h.toLowerCase(); if(MAP[k]) colCats.push({idx,cat:MAP[k]}) })
+      if(!colCats.length) throw new Error('Não encontrei colunas de categoria (Vaca, Novilha, Boi...).')
+      if(!state.pastos) state.pastos=[]; if(!state.movimentos) state.movimentos=[]
+      let nPastos=0, nMov=0
+      const hoje=new Date().toISOString().substring(0,10)
+      for(let i=hi+1;i<rows.length;i++){
+        const row=rows[i]; const nome=String(row[colPasto]||'').trim()
+        if(!nome || /total/i.test(nome)) continue
+        let pasto=state.pastos.find(p=>p.nome.toLowerCase()===nome.toLowerCase())
+        if(!pasto){ pasto={id:'pa_'+Math.random().toString(36).slice(2),nome,areaHa:0,areaUtil:0,capacidade:0,obs:''}; state.pastos.push(pasto); nPastos++ }
+        // somar por categoria (Vaca P+ e Vaca P- caem em Vaca)
+        const acc={}
+        colCats.forEach(({idx,cat})=>{ const v=Number(row[idx])||0; if(v>0) acc[cat]=(acc[cat]||0)+v })
+        Object.entries(acc).forEach(([cat,q])=>{ state.movimentos.push({id:'mv_'+Math.random().toString(36).slice(2),data:hoje,tipo:'saldo_inicial',categoria:cat,qtd:q,pastoId:pasto.id,pastoDestinoId:null,peso:null,obs:'Importado'}); nMov++ })
+      }
+      saveState()
+      alert(`Importado: ${nPastos} pastos e ${nMov} lançamentos de saldo inicial.`)
+      estoqueView='pastos'; renderModEstoque(document.getElementById('viewGeneric'))
+    }catch(err){ alert('Erro ao importar: '+(err.message||err)) }
+  }
+  r.readAsArrayBuffer(file)
 }
 
 // ============================================================
@@ -2970,7 +3184,8 @@ let _saveTimer = null
 
 function dadosApp(){
   return { entidades:state.entidades||[], importacoes:state.importacoes||[], lancamentos:state.lancamentos||[],
-           regrasCategoria:state.regrasCategoria||[], alertas:state.alertas||[] }
+           regrasCategoria:state.regrasCategoria||[], alertas:state.alertas||[],
+           pastos:state.pastos||[], movimentos:state.movimentos||[], categoriasAnimal:state.categoriasAnimal||null }
 }
 
 // override: identidade vem do Supabase
@@ -3008,7 +3223,8 @@ async function carregarDados(ws){
   let c = {}
   try { const { data } = await sb.from('dados').select('conteudo').eq('workspace', ws).maybeSingle(); c = (data&&data.conteudo)||{} } catch(e){}
   state = { entidades:c.entidades||[], importacoes:c.importacoes||[], lancamentos:c.lancamentos||[],
-            usuarios:[], sessao:null, regrasCategoria:c.regrasCategoria||[], alertas:c.alertas||[] }
+            usuarios:[], sessao:null, regrasCategoria:c.regrasCategoria||[], alertas:c.alertas||[],
+            pastos:c.pastos||[], movimentos:c.movimentos||[], categoriasAnimal:c.categoriasAnimal||null }
   filteredLancamentos = [...state.lancamentos]
 }
 
