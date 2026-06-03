@@ -13,7 +13,7 @@
   :root{--green:#0c064b;--green-light:#eeedf8;--red:#e0354a;--blue:#2563eb;--yellow:#c98a16;--gray:#86868b;--ink:#1d1d1f;--line:#ececf0;--soft:0 1px 3px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.04)}
 
   /* HEADER */
-  .header{background:rgba(255,255,255,.8);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid rgba(0,0,0,.06);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+  .header{background:#fff;border-bottom:1px solid rgba(0,0,0,.06);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
   .logo{display:flex;align-items:center;gap:10px}
   .logo-icon{width:36px;height:36px;background:var(--green);border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#fff;letter-spacing:-.5px;font-family:Georgia,serif}
   .logo h1{font-size:16px;font-weight:700;color:var(--ink);letter-spacing:-.4px}
@@ -206,16 +206,16 @@
 
   /* HAMBÚRGUER / DRAWER */
   .hamburger{display:none;background:none;border:1px solid #e5e7eb;border-radius:8px;padding:6px;cursor:pointer;color:#0c064b}
-  #navBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:140}
+  #navBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:240}
 
   @media(max-width:1024px){
     /* remover backdrop-filter no mobile: ele cria containing-block e prende o menu fixo dentro do header */
     .header{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:#fff!important}
     .hamburger{display:flex;align-items:center;justify-content:center}
-    #navBar{position:fixed;top:0;right:0;height:100%;width:min(80vw,300px);background:#fff;
+    #navBar{position:fixed;top:0;right:0;bottom:0;height:auto;width:min(82vw,320px);background:#fff;
       flex-direction:column!important;align-items:stretch!important;gap:2px!important;
-      padding:18px 14px;overflow-y:auto;z-index:150;transform:translateX(100%);
-      transition:transform .25s ease;box-shadow:-6px 0 24px rgba(0,0,0,.12);flex-wrap:nowrap!important}
+      padding:18px 14px;overflow-y:auto;z-index:250;transform:translateX(100%);
+      transition:transform .25s ease;box-shadow:-8px 0 30px rgba(0,0,0,.18);flex-wrap:nowrap!important}
     #navBar.open{transform:translateX(0)}
     #navBar .nav-btn{width:100%;justify-content:flex-start!important;padding:11px 12px;font-size:14px}
     #navBar .btn-primary{width:100%;margin-top:8px;padding:11px}
