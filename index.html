@@ -2016,10 +2016,29 @@ function renderDashboard() {
   })
 }
 
-function initChart(id, type, data, extraOpts) {
+// plugin: desenha o % dentro das fatias de pizza/rosca
+const _pctSlicePlugin = {
+  id:'pctSlice',
+  afterDatasetsDraw(chart, args, opts){
+    if(!opts || !opts.enabled) return
+    const meta = chart.getDatasetMeta(0); if(!meta || !meta.data || !meta.data.length) return
+    const arr = (chart.data.datasets[0].data||[]).map(v=>Math.abs(Number(v)||0))
+    const tot = arr.reduce((a,b)=>a+b,0); if(!tot) return
+    const ctx = chart.ctx; ctx.save()
+    ctx.font='700 11px -apple-system,Segoe UI,sans-serif'; ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle'
+    meta.data.forEach((arc,i)=>{ const p=arr[i]/tot*100; if(p<6) return; const pos=arc.tooltipPosition(); ctx.fillText(p.toFixed(0)+'%', pos.x, pos.y) })
+    ctx.restore()
+  }
+}
+
+function initChart(id, type, data, extraOpts, cfg) {
   const el = document.getElementById(id)
   if (!el) return
   if (charts[id]) { charts[id].destroy(); delete charts[id] }
+  cfg = cfg || {}
+  const money = cfg.money !== false    // valores em R$ por padrão
+  const comPct = cfg.pct !== false     // mostra percentuais por padrão
+  const fmtV = money ? (v=>fmt(v)) : (v=>fmtNum(v))
   let realType = type
   if (type === 'area') {
     realType = 'line'
@@ -2028,26 +2047,51 @@ function initChart(id, type, data, extraOpts) {
   if (type === 'pie' || type === 'doughnut') {
     data.datasets.forEach(ds => { if (typeof ds.backgroundColor === 'string' || !ds.backgroundColor) ds.backgroundColor = CORES })
   }
-  charts[id] = new Chart(el.getContext('2d'), {
-    type: realType,
-    data,
-    options: { responsive:true, maintainAspectRatio:false, ...extraOpts }
-  })
+  const opts = { responsive:true, maintainAspectRatio:false, ...extraOpts }
+  if (comPct) {
+    opts.plugins = opts.plugins || {}
+    opts.plugins.tooltip = opts.plugins.tooltip || {}
+    opts.plugins.tooltip.callbacks = opts.plugins.tooltip.callbacks || {}
+    if (!opts.plugins.tooltip.callbacks.label) {
+      opts.plugins.tooltip.callbacks.label = function(ctx){
+        const dd = (ctx.chart.data.datasets[ctx.datasetIndex].data||[]).map(v=>Math.abs(Number(v)||0))
+        const tot = dd.reduce((a,b)=>a+b,0)
+        let val = ctx.parsed
+        if (val && typeof val==='object') val = (val.y!=null?val.y:(val.r!=null?val.r:ctx.raw))
+        val = Number(val); if (isNaN(val)) val = Number(ctx.raw)||0
+        const lbl = ctx.dataset.label || ctx.label || ''
+        const p = tot>0 ? Math.abs(val)/tot*100 : 0
+        return `${lbl?lbl+': ':''}${fmtV(val)}${p?` (${p.toFixed(1)}%)`:''}`
+      }
+    }
+    if (type==='pie' || type==='doughnut') opts.plugins.pctSlice = { enabled:true }
+  }
+  charts[id] = new Chart(el.getContext('2d'), { type: realType, data, options: opts, plugins:[_pctSlicePlugin] })
 }
 
-// ---- Tipos de gráfico configuráveis por widget ----
+// ---- Tipos de gráfico configuráveis (Dashboard + módulos) ----
 const CHART_TYPES = {
-  evolucao: { def:'line',     opts:[['line','Linha'],['bar','Barra'],['area','Área']] },
-  recpie:   { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
-  custbar:  { def:'bar',      opts:[['bar','Barra'],['pie','Pizza'],['doughnut','Rosca']] },
-  custpie:  { def:'pie',      opts:[['pie','Pizza'],['doughnut','Rosca'],['bar','Barra']] },
-  cc:       { def:'bar',      opts:[['bar','Barra'],['line','Linha'],['pie','Pizza']] },
-  fazendas: { def:'bar',      opts:[['bar','Barra'],['line','Linha']] },
+  evolucao:    { def:'line',     opts:[['line','Linha'],['area','Área'],['bar','Barra']] },
+  recpie:      { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
+  custbar:     { def:'bar',      opts:[['bar','Barra'],['line','Linha'],['area','Área'],['pie','Pizza'],['doughnut','Rosca']] },
+  custpie:     { def:'pie',      opts:[['pie','Pizza'],['doughnut','Rosca'],['bar','Barra']] },
+  cc:          { def:'bar',      opts:[['bar','Barra'],['line','Linha'],['area','Área'],['pie','Pizza'],['doughnut','Rosca']] },
+  fazendas:    { def:'bar',      opts:[['bar','Barra'],['line','Linha'],['area','Área']] },
+  custos_mod:  { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
+  estoque_cat: { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
+  rebanho_evol:{ def:'line',     opts:[['line','Linha'],['area','Área'],['bar','Barra']] },
+  lanc_cat:    { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
 }
 const CHART_KEY = 'dre_charttypes_v1'
 function _chartTypes(){ try{ return JSON.parse(LS.getItem(CHART_KEY))||{} }catch(e){ return {} } }
-function getCType(id){ return _chartTypes()[id] || CHART_TYPES[id].def }
-function setCType(id,t){ const c=_chartTypes(); c[id]=t; LS.setItem(CHART_KEY,JSON.stringify(c)); renderDashboard() }
+function getCType(id){ const def = CHART_TYPES[id] ? CHART_TYPES[id].def : 'bar'; return _chartTypes()[id] || def }
+function setCType(id,t){ const c=_chartTypes(); c[id]=t; LS.setItem(CHART_KEY,JSON.stringify(c)); rerenderModuloAtual() }
+function rerenderModuloAtual(){
+  if (typeof currentModule==='undefined' || currentModule==='dashboard'){ renderDashboard(); return }
+  const m = MODULES.find(x=>x.id===currentModule)
+  if (m && typeof m.render==='function') m.render(document.getElementById('viewGeneric'))
+  else renderDashboard()
+}
 function chartToolbar(id){
   const cur = getCType(id)
   return `<div style="display:flex;justify-content:flex-end;margin-bottom:6px">
@@ -2300,12 +2344,13 @@ function renderModCustos(c) {
         <div class="kpi"><div class="kpi-label">% s/ Receita</div><div class="kpi-value yellow">${d.receitaTotal>0?fmtPct(d.despesaTotal/d.receitaTotal*100):'—'}</div></div>
       </div>`)}
       ${modCard('Ranking por Categoria', linhas || '<p style="color:#9ca3af;font-size:13px">Sem dados de custo.</p>', 'half')}
-      ${modCard('Distribuição', `<div class="chart-wrap"><canvas id="cmCustos"></canvas></div>`, 'half')}
+      ${modCard('Distribuição', chartToolbar('custos_mod')+`<div class="chart-wrap"><canvas id="cmCustos"></canvas></div>`, 'half')}
     </div>`
 
-  requestAnimationFrame(() => initChart('cmCustos','doughnut',
-    {labels:entries.map(e=>e[0]),datasets:[{data:entries.map(e=>e[1]),backgroundColor:CORES,borderWidth:2,borderColor:'#fff'}]},
-    {plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10}}}}))
+  const tCM = getCType('custos_mod')
+  requestAnimationFrame(() => initChart('cmCustos',tCM,
+    {labels:entries.map(e=>e[0]),datasets:[{label:'Custo',data:entries.map(e=>e[1]),backgroundColor:CORES,borderWidth:tCM==='bar'?0:2,borderColor:'#fff',borderRadius:4}]},
+    tCM==='bar'?{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'R$'+(v/1000).toFixed(0)+'k'},grid:{color:'#f3f4f6'}}}}:{plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10}}}}))
 }
 
 // ============================================================
@@ -2582,14 +2627,16 @@ async function renderModEstoque(c){
     const valLinhas = vr.linhas.map(l=>`<div class="dre-row"><span class="dre-label">${l.cat} <span style="color:#9ca3af;font-weight:400">· ${l.base}</span></span><span class="dre-val ${l.val?'pos':''}">${l.val?fmt(l.val):'—'}</span></div>`).join('')
     corpo = `<div class="widget-grid">
       ${modCard('Rebanho por categoria', kpis)}
-      ${modCard('Composição', `<div class="chart-wrap"><canvas id="cEstoqueCat"></canvas></div>`)}
+      ${modCard('Composição', chartToolbar('estoque_cat')+`<div class="chart-wrap"><canvas id="cEstoqueCat"></canvas></div>`)}
       ${modCard('Patrimônio do Rebanho (preço de mercado)', valLinhas + `<div class="dre-row total"><span class="dre-label b">Total</span><span class="dre-val b pos">${fmt(vr.total)}</span></div>` + `<p style="font-size:11px;color:#9ca3af;margin-top:8px">Boi/Vaca avaliados por @ (premissa de @/cabeça); bezerro/garrote/novilha por cabeça. Cadastre as cotações em <strong>Mercado</strong>. ${vr.total?'':'— nenhuma cotação cadastrada ainda.'}</p>`)}
     </div>`
     requestAnimationFrame(()=>{
       const ent=e.cats.filter(cat=>e.porCategoria[cat]>0)
-      initChart('cEstoqueCat','doughnut',
-        {labels:ent,datasets:[{data:ent.map(cat=>e.porCategoria[cat]),backgroundColor:CORES,borderWidth:2,borderColor:'#fff'}]},
-        {plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:10}}}})
+      const tEC=getCType('estoque_cat')
+      initChart('cEstoqueCat',tEC,
+        {labels:ent,datasets:[{label:'Cabeças',data:ent.map(cat=>e.porCategoria[cat]),backgroundColor:CORES,borderWidth:tEC==='bar'?0:2,borderColor:'#fff',borderRadius:4}]},
+        tEC==='bar'?{plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f3f4f6'}}}}:{plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:10}}}},
+        {money:false})
     })
   }
 
@@ -2648,13 +2695,14 @@ async function renderModEstoque(c){
     const gmdLista = gmds.length? gmds.map(x=>`<div class="dre-row"><span class="dre-label">${x.nome}</span><span class="dre-val ${x.gmd>=0?'pos':'neg'}">${x.gmd.toFixed(3)} kg/dia</span></div>`).join('') : '<p style="color:#9ca3af;font-size:13px">Registre <strong>2+ pesagens</strong> num pasto (movimentação tipo "Pesagem") para calcular o GMD.</p>'
     corpo=`<div class="widget-grid">
       ${modCard('Indicadores de desempenho', kpis)}
-      ${modCard('Evolução do rebanho', `<div class="chart-wrap"><canvas id="cEvolRebanho"></canvas></div>`)}
+      ${modCard('Evolução do rebanho', chartToolbar('rebanho_evol')+`<div class="chart-wrap"><canvas id="cEvolRebanho"></canvas></div>`)}
       ${modCard('GMD por pasto', gmdLista, 'half')}
     </div>`
     requestAnimationFrame(()=>{
-      if(evol.length){ initChart('cEvolRebanho','line',
-        {labels:evol.map(([d])=>fmtDataCot(d)),datasets:[{label:'Cabeças',data:evol.map(([,v])=>v),borderColor:'#0c064b',backgroundColor:'rgba(12,6,75,.08)',fill:true,tension:.3,pointRadius:2,borderWidth:2}]},
-        {plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f3f4f6'}}}}) }
+      if(evol.length){ const tER=getCType('rebanho_evol'); initChart('cEvolRebanho',tER,
+        {labels:evol.map(([d])=>fmtDataCot(d)),datasets:[{label:'Cabeças',data:evol.map(([,v])=>v),borderColor:'#0c064b',backgroundColor:tER==='bar'?'#0c064b':'rgba(12,6,75,.08)',fill:tER!=='bar',tension:.3,pointRadius:2,borderWidth:2,borderRadius:4}]},
+        {plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f3f4f6'}}}},
+        {money:false}) }
     })
   }
 
@@ -4315,6 +4363,8 @@ function salvarLancamentoManual(){
 // MÓDULO: LANÇAMENTOS (ver todos / corrigir / excluir)
 // ============================================================
 let lancFiltro = { busca:'', tipo:'', faz:'', cat:'', sit:'', mes:'' }
+function getLancView(){ return LS.getItem('dre_lancview') || 'tabela' }
+function setLancView(v){ LS.setItem('dre_lancview', v); renderModLancamentos(document.getElementById('viewGeneric')) }
 function fmtDataBR(s){ if(!s) return '—'; const p=String(s).split('-'); return p.length===3 ? `${p[2]}/${p[1]}/${p[0].slice(2)}` : s }
 function garantirIdsLancamentos(){ let mud=false; (state.lancamentos||[]).forEach(l=>{ if(!l.id){ l.id='l_'+Math.random().toString(36).slice(2,10); mud=true } }); if(mud) saveState() }
 function setLancFiltro(campo,val){ lancFiltro[campo]=val; renderModLancamentos(document.getElementById('viewGeneric')) }
@@ -4360,6 +4410,35 @@ function renderModLancamentos(c){
     </tr>`
   }).join('')
 
+  // visão em gráfico: por categoria do tipo predominante do filtro
+  const lancView = getLancView()
+  const tipoChart = f.tipo==='RECEITA' ? 'RECEITA' : 'DESPESA'
+  const porCat = {}
+  arr.filter(l=>l.tipo===tipoChart).forEach(l=>{ const ct=l.categoria||'Outros'; porCat[ct]=(porCat[ct]||0)+(Number(l.valor)||0) })
+  const catEntries = Object.entries(porCat).sort((a,b)=>b[1]-a[1])
+  const totalChart = catEntries.reduce((s,e)=>s+e[1],0)
+  window._lancChart = { labels:catEntries.map(e=>e[0]), valores:catEntries.map(e=>e[1]) }
+
+  const toggle = `<div style="display:flex;justify-content:flex-end;gap:6px;margin:0 0 10px">
+      <button class="nav-btn" style="font-size:11px;padding:4px 10px${lancView==='tabela'?';background:var(--green);color:#fff':''}" onclick="setLancView('tabela')">Tabela</button>
+      <button class="nav-btn" style="font-size:11px;padding:4px 10px${lancView==='grafico'?';background:var(--green);color:#fff':''}" onclick="setLancView('grafico')">Gráfico</button>
+    </div>`
+
+  const tabela = `<div class="widget span-full" style="cursor:default"><div class="widget-body" style="overflow-x:auto">
+        <style>.lanctbl{width:100%;border-collapse:collapse;font-size:13px}.lanctbl th{text-align:left;color:#9ca3af;font-size:11px;text-transform:uppercase;font-weight:700;padding:6px 8px;border-bottom:1px solid #ececf0}.lanctbl td{border-bottom:1px solid #f3f4f6;padding:7px 8px;vertical-align:top}.lanctbl tbody tr:hover{background:#fafafa}</style>
+        <table class="lanctbl">
+          <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Fazenda</th><th>Tipo</th><th style="text-align:right">Valor</th><th>Situação</th><th style="text-align:right">Ações</th></tr></thead>
+          <tbody>${linhas||'<tr><td colspan="8" style="padding:16px;color:#9ca3af;text-align:center">Nenhum lançamento encontrado com esses filtros.</td></tr>'}</tbody>
+        </table>
+        ${arr.length>LIM?`<p style="font-size:12px;color:#9ca3af;margin-top:10px">Mostrando os primeiros ${LIM} de ${fmtNum(arr.length)}. Use os filtros para refinar a busca.</p>`:''}
+      </div></div>`
+
+  const grafico = `<div class="widget span-full" style="cursor:default"><div class="widget-body">
+        ${chartToolbar('lanc_cat')}
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:6px">${tipoChart==='RECEITA'?'Receitas':'Despesas'} por categoria — total ${fmt(totalChart)} (passe o mouse para ver os percentuais)</div>
+        ${catEntries.length?`<div class="chart-wrap" style="height:360px"><canvas id="cLancCat"></canvas></div>`:'<p style="color:#9ca3af;font-size:13px">Sem dados para o gráfico com os filtros atuais.</p>'}
+      </div></div>`
+
   c.innerHTML = pageHeader(ICON.lancamentos,'Lançamentos','Veja, corrija ou exclua qualquer lançamento — importados ou manuais')
     + (podeEditar?`<div style="margin-bottom:10px"><button class="btn-primary" onclick="abrirLancamentoManual()">+ Novo lançamento</button></div>`:'<p style="font-size:12px;color:#9ca3af;margin-bottom:10px">Você tem acesso de leitura. A edição depende de permissão de lançamento.</p>')
     + `<div class="filter-bar" style="flex-wrap:wrap;gap:8px">
@@ -4377,14 +4456,15 @@ function renderModLancamentos(c){
         <div class="kpi"><div class="kpi-label">Despesas (filtro)</div><div class="kpi-value neg">${fmt(des)}</div></div>
         <div class="kpi"><div class="kpi-label">Resultado (filtro)</div><div class="kpi-value ${result>=0?'pos':'neg'}">${fmt(result)}</div></div>
       </div>`
-    + `<div class="widget span-full" style="cursor:default"><div class="widget-body" style="overflow-x:auto">
-        <style>.lanctbl{width:100%;border-collapse:collapse;font-size:13px}.lanctbl th{text-align:left;color:#9ca3af;font-size:11px;text-transform:uppercase;font-weight:700;padding:6px 8px;border-bottom:1px solid #ececf0}.lanctbl td{border-bottom:1px solid #f3f4f6;padding:7px 8px;vertical-align:top}.lanctbl tbody tr:hover{background:#fafafa}</style>
-        <table class="lanctbl">
-          <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Fazenda</th><th>Tipo</th><th style="text-align:right">Valor</th><th>Situação</th><th style="text-align:right">Ações</th></tr></thead>
-          <tbody>${linhas||'<tr><td colspan="8" style="padding:16px;color:#9ca3af;text-align:center">Nenhum lançamento encontrado com esses filtros.</td></tr>'}</tbody>
-        </table>
-        ${arr.length>LIM?`<p style="font-size:12px;color:#9ca3af;margin-top:10px">Mostrando os primeiros ${LIM} de ${fmtNum(arr.length)}. Use os filtros para refinar a busca.</p>`:''}
-      </div></div>`
+    + toggle
+    + (lancView==='grafico' ? grafico : tabela)
+
+  if (lancView==='grafico' && catEntries.length) {
+    const t = getCType('lanc_cat')
+    requestAnimationFrame(()=> initChart('cLancCat', t,
+      { labels: window._lancChart.labels, datasets:[{ label:(tipoChart==='RECEITA'?'Receita':'Despesa'), data: window._lancChart.valores, backgroundColor:CORES, borderWidth:t==='bar'?0:2, borderColor:'#fff', borderRadius:4 }] },
+      t==='bar'?{plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'R$'+(v/1000).toFixed(0)+'k'},grid:{color:'#f3f4f6'}}}}:{plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:10}}}}))
+  }
 }
 function editarLanc(id){
   if(!podeLancarManual()){ alert('Você não tem permissão para editar lançamentos.'); return }
