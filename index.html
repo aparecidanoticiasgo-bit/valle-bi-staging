@@ -738,6 +738,7 @@ const ICON = {
   alertas:    _svg('<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/>'),
   regras:     _svg('<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2"/>'),
   comunicados:_svg('<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a4 4 0 0 1 0 8M18.5 5.5a7 7 0 0 1 0 13"/>'),
+  lancamentos:_svg('<rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="13" y2="16"/>'),
 }
 
 const MODULES = [
@@ -747,6 +748,7 @@ const MODULES = [
   { id:'pecuario',     label:'Pecuária',       icon:ICON.pecuario,    kind:'generic',  render:renderModPecuario },
   { id:'diarias',      label:'Diárias',        icon:ICON.diarias,     kind:'generic',  render:renderModDiarias },
   { id:'caixa',        label:'Fluxo de Caixa', icon:ICON.caixa,       kind:'generic',  render:renderModCaixa },
+  { id:'lancamentos',  label:'Lançamentos',    icon:ICON.lancamentos, kind:'generic',  render:renderModLancamentos },
   { id:'estoque',      label:'Estoque Animal', icon:ICON.estoque,     kind:'generic',  render:renderModEstoque },
   { id:'mercado',      label:'Mercado',        icon:ICON.mercado,     kind:'generic',  render:renderModMercado },
   { id:'simuladores',  label:'Simuladores',    icon:ICON.simuladores, kind:'generic',  render:renderModSimuladores },
@@ -767,9 +769,9 @@ const MODULES = [
 const PERFIS = {
   suporte:      { label:'Suporte Valle', mods:'*' },
   admin:        { label:'Administrador', mods:'*' },
-  consultor:    { label:'Consultor',     mods:['dashboard','dre','custos','pecuario','diarias','caixa','estoque','mercado','simuladores','benchmark','consultor','entidades'] },
-  gestor:       { label:'Gestor',        mods:['dashboard','dre','custos','pecuario','diarias','caixa','estoque','mercado','simuladores','benchmark','consultor','entidades'] },
-  proprietario: { label:'Proprietário',  mods:['dashboard','dre','custos','pecuario','caixa','mercado','benchmark','consultor'] },
+  consultor:    { label:'Consultor',     mods:['dashboard','dre','custos','pecuario','diarias','caixa','lancamentos','estoque','mercado','simuladores','benchmark','consultor','entidades'] },
+  gestor:       { label:'Gestor',        mods:['dashboard','dre','custos','pecuario','diarias','caixa','lancamentos','estoque','mercado','simuladores','benchmark','consultor','entidades'] },
+  proprietario: { label:'Proprietário',  mods:['dashboard','dre','custos','pecuario','caixa','lancamentos','mercado','benchmark','consultor'] },
 }
 
 // Permissões extras (não são módulos do menu, são ações)
@@ -1705,11 +1707,11 @@ const WIDGET_DEFS = [
   { id:'agro',       label:'Indicadores de Agricultura', span:'half' },
 ]
 
-// Resumo da agricultura (todas as entidades/safras)
+// Resumo da agricultura (todas as entidades/safras) — sc e kg separados, receita/custo agregam
 function agroResumo(){
-  let area=0,sacas=0,custo=0,receitaEst=0,culturas=0
-  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{ area+=Number(s.ha)||0; sacas+=Number(s.sacas)||0; custo+=Number(s.custo)||0; receitaEst+=(Number(s.sacas)||0)*(Number(s.preco)||0); culturas++ }) })
-  return { area, sacas, custo, receitaEst, culturas }
+  let area=0,sacas=0,kg=0,custo=0,receitaEst=0,culturas=0
+  ;(state.entidades||[]).forEach(e=>{ (e.safras||[]).forEach(s=>{ const q=Number(s.sacas)||0, un=(s.unidade||'sc'); area+=Number(s.ha)||0; if(un==='kg') kg+=q; else sacas+=q; custo+=Number(s.custo)||0; receitaEst+=q*(Number(s.preco)||0); culturas++ }) })
+  return { area, sacas, kg, custo, receitaEst, culturas }
 }
 
 const LAYOUT_KEY = 'dre_layout_v1'
@@ -2218,16 +2220,19 @@ function htmlPecuaria(d) {
 
 function htmlAgro(d) {
   const a = agroResumo()
-  const prod   = a.area>0 ? a.sacas/a.area : 0   // sacas por hectare
+  const un = a.sacas>0 ? 'sc' : (a.kg>0 ? 'kg' : 'sc')
+  const qtdProd = un==='kg' ? a.kg : a.sacas
+  const prod   = a.area>0 ? qtdProd/a.area : 0   // produção por hectare na unidade predominante
   const custoHa= a.area>0 ? a.custo/a.area : 0
   const margem = a.receitaEst - a.custo
+  const prodTxt = (a.sacas>0 && a.kg>0) ? `${fmtNum(a.sacas)} <span style="font-size:13px;color:#9ca3af">sc</span> + ${fmtNum(a.kg)} <span style="font-size:13px;color:#9ca3af">kg</span>` : `${fmtNum(qtdProd)} <span style="font-size:13px;color:#9ca3af">${un}</span>`
   return `<div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(a.area)} <span style="font-size:13px;color:#9ca3af">ha</span></div></div>
-    <div class="kpi"><div class="kpi-label">Produtividade</div><div class="kpi-value yellow">${prod.toFixed(1)} <span style="font-size:13px;color:#9ca3af">sc/ha</span></div></div>
+    <div class="kpi"><div class="kpi-label">Produtividade</div><div class="kpi-value yellow">${prod.toFixed(1)} <span style="font-size:13px;color:#9ca3af">${un}/ha</span></div></div>
     <div class="kpi"><div class="kpi-label">Custo / ha</div><div class="kpi-value neg">${fmt(custoHa)}</div></div>
     <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${fmt(a.receitaEst)}</div></div>
     <div class="kpi"><div class="kpi-label">Margem Estimada</div><div class="kpi-value ${margem>=0?'pos':'neg'}">${fmt(margem)}</div></div>
-    <div class="kpi"><div class="kpi-label">Produção Total</div><div class="kpi-value">${fmtNum(a.sacas)} <span style="font-size:13px;color:#9ca3af">sc</span></div></div>
+    <div class="kpi"><div class="kpi-label">Produção Total</div><div class="kpi-value">${prodTxt}</div></div>
   </div>`
 }
 
@@ -3032,10 +3037,12 @@ function renderModAgricultura(c) {
   }
   const safras = ent.safras || []
   const areaTotal = safras.reduce((s,x)=>s+(Number(x.ha)||0),0)
-  const sacasTotal = safras.reduce((s,x)=>s+(Number(x.sacas)||0),0)
+  const scTotal = safras.filter(x=>(x.unidade||'sc')==='sc').reduce((s,x)=>s+(Number(x.sacas)||0),0)
+  const kgTotal = safras.filter(x=>(x.unidade||'sc')==='kg').reduce((s,x)=>s+(Number(x.sacas)||0),0)
   const receitaEstTotal = safras.reduce((s,x)=>s+((Number(x.sacas)||0)*(Number(x.preco)||0)),0)
   const custoTotal = safras.reduce((s,x)=>s+(Number(x.custo)||0),0)
   const margemTotal = receitaEstTotal - custoTotal
+  const prodTotalTxt = (scTotal>0&&kgTotal>0) ? `${fmtNum(scTotal)} sc + ${fmtNum(kgTotal)} kg` : (kgTotal>0 ? `${fmtNum(kgTotal)} kg` : `${fmtNum(scTotal)} sc`)
 
   // seletor de entidade (se houver mais de uma)
   const selEnt = state.entidades.length>1 ? `
@@ -3047,25 +3054,28 @@ function renderModAgricultura(c) {
 
   // linhas de culturas (cada cultura com seu próprio custo)
   const linhas = safras.map((x,i)=>{
-    const ha=Number(x.ha)||0, sacas=Number(x.sacas)||0, preco=Number(x.preco)||0, custo=Number(x.custo)||0
-    const prod = ha>0 ? sacas/ha : 0
-    const receita = sacas*preco
+    const ha=Number(x.ha)||0, qtd=Number(x.sacas)||0, preco=Number(x.preco)||0, custo=Number(x.custo)||0
+    const un = (x.unidade||'sc')
+    const prod = ha>0 ? qtd/ha : 0
+    const receita = qtd*preco
     const margem = receita - custo
     const custoHa = ha>0 ? custo/ha : 0
-    const custoSaca = sacas>0 ? custo/sacas : 0
+    const custoUn = qtd>0 ? custo/qtd : 0
     const optCult = CULTURAS.map(cu=>`<option ${x.cultura===cu?'selected':''}>${cu}</option>`).join('')
-    return `<div style="display:grid;grid-template-columns:1.2fr .8fr .8fr .9fr 1fr auto;gap:8px;align-items:center;padding:6px 0">
+    const optUn = ['sc','kg'].map(u=>`<option value="${u}" ${un===u?'selected':''}>${u}</option>`).join('')
+    return `<div style="display:grid;grid-template-columns:1.1fr .65fr .7fr .5fr .8fr .9fr auto;gap:8px;align-items:center;padding:6px 0">
       <select class="form-input" onchange="setSafra(${i},'cultura',this.value)">${optCult}</select>
       <input class="form-input" type="number" step="any" value="${x.ha||''}" placeholder="ha" onchange="setSafra(${i},'ha',this.value)">
-      <input class="form-input" type="number" step="any" value="${x.sacas||''}" placeholder="sacas" onchange="setSafra(${i},'sacas',this.value)">
-      <input class="form-input" type="number" step="any" value="${x.preco||''}" placeholder="R$/sc" onchange="setSafra(${i},'preco',this.value)">
+      <input class="form-input" type="number" step="any" value="${x.sacas||''}" placeholder="produção" onchange="setSafra(${i},'sacas',this.value)">
+      <select class="form-input" onchange="setSafra(${i},'unidade',this.value)" title="Unidade (sc = saca 60kg / kg)">${optUn}</select>
+      <input class="form-input" type="number" step="any" value="${x.preco||''}" placeholder="R$/${un}" onchange="setSafra(${i},'preco',this.value)">
       <input class="form-input" type="number" step="any" value="${x.custo||''}" placeholder="custo total" onchange="setSafra(${i},'custo',this.value)">
       <button class="nav-btn" style="color:#dc2626" onclick="removerSafra(${i})">✕</button>
     </div>
     <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6b7280;padding:0 0 10px 2px;border-bottom:1px solid #f3f4f6;margin-bottom:6px">
-      <span>Produtiv.: <strong>${prod?prod.toFixed(1):'—'} sc/ha</strong></span>
+      <span>Produtiv.: <strong>${prod?prod.toFixed(1):'—'} ${un}/ha</strong></span>
       <span>Custo/ha: <strong style="color:#dc2626">${custoHa?fmt(custoHa):'—'}</strong></span>
-      <span>Custo/saca: <strong style="color:#dc2626">${custoSaca?fmt(custoSaca):'—'}</strong></span>
+      <span>Custo/${un}: <strong style="color:#dc2626">${custoUn?fmt(custoUn):'—'}</strong></span>
       <span>Receita: <strong style="color:#16a34a">${receita?fmt(receita):'—'}</strong></span>
       <span>Margem: <strong style="color:${margem>=0?'#16a34a':'#dc2626'}">${(receita||custo)?fmt(margem):'—'}</strong></span>
     </div>`
@@ -3075,15 +3085,16 @@ function renderModAgricultura(c) {
     selEnt +
     `<div class="widget-grid">
       ${modCard('Culturas da safra — '+ent.nome, `
-        <div style="display:grid;grid-template-columns:1.2fr .8fr .8fr .9fr 1fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
-          <span>Cultura</span><span>Área(ha)</span><span>Prod.(sc)</span><span>Preço/sc</span><span>Custo total</span><span></span>
+        <div style="display:grid;grid-template-columns:1.1fr .65fr .7fr .5fr .8fr .9fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
+          <span>Cultura</span><span>Área(ha)</span><span>Produção</span><span>Un.</span><span>Preço/un</span><span>Custo total</span><span></span>
         </div>
         ${linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma cultura. Adicione abaixo.</p>'}
         <div style="margin-top:10px"><button class="btn-secondary" onclick="addSafra()">+ Adicionar cultura</button></div>
-        <p style="font-size:11px;color:#9ca3af;margin-top:8px">Informe o <strong>custo total</strong> de cada cultura para ver custo/ha, custo/saca e margem separados.</p>
+        <p style="font-size:11px;color:#9ca3af;margin-top:8px">Unidade <strong>sc</strong> = saca de 60kg; use <strong>kg</strong> para culturas como o gergelim. Informe o <strong>custo total</strong> de cada cultura para ver custo/ha, custo/un e margem.</p>
       `)}
       ${modCard('Totais da safra', `<div class="kpi-grid">
         <div class="kpi"><div class="kpi-label">Área Total</div><div class="kpi-value blue">${fmtNum(areaTotal)} ha</div></div>
+        <div class="kpi"><div class="kpi-label">Produção Total</div><div class="kpi-value">${(scTotal||kgTotal)?prodTotalTxt:'—'}</div></div>
         <div class="kpi"><div class="kpi-label">Custo Total (culturas)</div><div class="kpi-value neg">${custoTotal?fmt(custoTotal):'—'}</div></div>
         <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${receitaEstTotal?fmt(receitaEstTotal):'—'}</div></div>
         <div class="kpi"><div class="kpi-label">Margem Total</div><div class="kpi-value ${margemTotal>=0?'pos':'neg'}">${(receitaEstTotal||custoTotal)?fmt(margemTotal):'—'}</div></div>
@@ -3092,11 +3103,11 @@ function renderModAgricultura(c) {
       </div>`)}
     </div>`
 }
-function addSafra(){ const e=agroEntidade(); if(!e)return; e.safras.push({cultura:'Soja',ha:0,sacas:0,preco:0,custo:0}); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
+function addSafra(){ const e=agroEntidade(); if(!e)return; e.safras.push({cultura:'Soja',ha:0,sacas:0,unidade:'sc',preco:0,custo:0}); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
 function removerSafra(i){ const e=agroEntidade(); if(!e)return; e.safras.splice(i,1); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
 function setSafra(i,campo,val){
   const e=agroEntidade(); if(!e||!e.safras[i])return
-  e.safras[i][campo] = (campo==='cultura') ? val : (parseFloat(val)||0)
+  e.safras[i][campo] = (campo==='cultura'||campo==='unidade') ? val : (parseFloat(val)||0)
   saveState()
   renderModAgricultura(document.getElementById('viewGeneric'))
 }
@@ -4085,7 +4096,7 @@ async function renderModMercado(c){
   const agroCard = modCard('Valor da Produção Agrícola', `
     <div class="kpi-grid">
       <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(ag.area)} <span style="font-size:11px;color:#9ca3af">ha</span></div></div>
-      <div class="kpi"><div class="kpi-label">Produção</div><div class="kpi-value">${fmtNum(ag.sacas)} <span style="font-size:11px;color:#9ca3af">sc</span></div></div>
+      <div class="kpi"><div class="kpi-label">Produção</div><div class="kpi-value">${(ag.sacas>0&&ag.kg>0)?(fmtNum(ag.sacas)+' <span style="font-size:11px;color:#9ca3af">sc</span> + '+fmtNum(ag.kg)+' <span style="font-size:11px;color:#9ca3af">kg</span>'):((ag.kg>0)?(fmtNum(ag.kg)+' <span style="font-size:11px;color:#9ca3af">kg</span>'):(fmtNum(ag.sacas)+' <span style="font-size:11px;color:#9ca3af">sc</span>'))}</div></div>
       <div class="kpi"><div class="kpi-label">Valor (preço cadastrado)</div><div class="kpi-value pos">${ag.receitaEst?fmt(ag.receitaEst):'—'}</div></div>
       <div class="kpi"><div class="kpi-label">Valor a mercado</div><div class="kpi-value pos">${valorMercado?fmt(valorMercado):'—'}</div></div>
     </div>
@@ -4297,6 +4308,154 @@ function salvarLancamentoManual(){
   filteredLancamentos=[...state.lancamentos]
   closeModal()
   renderAll()
+  if(typeof currentModule!=='undefined' && currentModule==='lancamentos') renderModLancamentos(document.getElementById('viewGeneric'))
+}
+
+// ============================================================
+// MÓDULO: LANÇAMENTOS (ver todos / corrigir / excluir)
+// ============================================================
+let lancFiltro = { busca:'', tipo:'', faz:'', cat:'', sit:'', mes:'' }
+function fmtDataBR(s){ if(!s) return '—'; const p=String(s).split('-'); return p.length===3 ? `${p[2]}/${p[1]}/${p[0].slice(2)}` : s }
+function garantirIdsLancamentos(){ let mud=false; (state.lancamentos||[]).forEach(l=>{ if(!l.id){ l.id='l_'+Math.random().toString(36).slice(2,10); mud=true } }); if(mud) saveState() }
+function setLancFiltro(campo,val){ lancFiltro[campo]=val; renderModLancamentos(document.getElementById('viewGeneric')) }
+function limparLancFiltro(){ lancFiltro={busca:'',tipo:'',faz:'',cat:'',sit:'',mes:''}; renderModLancamentos(document.getElementById('viewGeneric')) }
+function lancFiltrados(){
+  let arr = (state.lancamentos||[]).slice()
+  const f = lancFiltro
+  if(f.tipo) arr = arr.filter(l=>l.tipo===f.tipo)
+  if(f.faz)  arr = arr.filter(l=>(l.fazenda||'')===f.faz)
+  if(f.cat)  arr = arr.filter(l=>(l.categoria||'')===f.cat)
+  if(f.sit)  arr = arr.filter(l=>(l.situacao||'')===f.sit)
+  if(f.mes)  arr = arr.filter(l=>(l.data||'').substring(0,7)===f.mes)
+  if(f.busca){ const q=f.busca.toLowerCase(); arr = arr.filter(l=> (l.descricao||'').toLowerCase().includes(q) || (l.conta||'').toLowerCase().includes(q) || (l.categoria||'').toLowerCase().includes(q) || (l.fazenda||'').toLowerCase().includes(q)) }
+  arr.sort((a,b)=> (b.data||'').localeCompare(a.data||''))
+  return arr
+}
+function renderModLancamentos(c){
+  garantirIdsLancamentos()
+  const todos = state.lancamentos||[]
+  const arr = lancFiltrados()
+  const podeEditar = podeLancarManual()
+  const fazendas = [...new Set(todos.map(l=>l.fazenda).filter(x=>x&&x.trim()))].sort()
+  const cats = [...new Set(todos.map(l=>l.categoria).filter(Boolean))].sort()
+  const meses = [...new Set(todos.filter(l=>l.data).map(l=>l.data.substring(0,7)))].sort().reverse()
+  let rec=0,des=0
+  arr.forEach(l=>{ const v=Number(l.valor)||0; if(l.tipo==='RECEITA') rec+=v; else des+=v })
+  const result = rec-des
+  const f = lancFiltro
+  const LIM = 400
+  const linhas = arr.slice(0,LIM).map(l=>{
+    const v = Number(l.valor)||0
+    const isRec = l.tipo==='RECEITA'
+    const sit = l.situacao==='PENDENTE' ? (isRec?'A receber':'A pagar') : (l.situacao==='LIQUIDADO'?(isRec?'Recebido':'Pago'):'—')
+    return `<tr>
+      <td style="white-space:nowrap">${fmtDataBR(l.data)}</td>
+      <td>${escapeHtml(l.descricao||'')}${l.origem==='manual'?' <span style="font-size:10px;color:#9ca3af">(manual)</span>':(l.origem==='nfe'?' <span style="font-size:10px;color:#9ca3af">(NF-e)</span>':'')}</td>
+      <td>${escapeHtml(l.categoria||'—')}</td>
+      <td>${escapeHtml(l.fazenda||'—')}</td>
+      <td><span style="font-size:11px;padding:2px 8px;border-radius:999px;background:${isRec?'#dcfce7':'#fee2e2'};color:${isRec?'#16a34a':'#dc2626'}">${isRec?'Receita':'Despesa'}</span></td>
+      <td style="text-align:right;white-space:nowrap;color:${isRec?'#16a34a':'#dc2626'};font-weight:600">${fmt(v)}</td>
+      <td style="font-size:12px;color:#6b7280">${sit}</td>
+      <td style="white-space:nowrap;text-align:right">${podeEditar?`<button class="nav-btn" style="padding:2px 8px" onclick="editarLanc('${l.id}')">editar</button> <button class="nav-btn" style="padding:2px 8px;color:#dc2626" onclick="excluirLanc('${l.id}')">excluir</button>`:'<span style="font-size:11px;color:#cbd5e1">—</span>'}</td>
+    </tr>`
+  }).join('')
+
+  c.innerHTML = pageHeader(ICON.lancamentos,'Lançamentos','Veja, corrija ou exclua qualquer lançamento — importados ou manuais')
+    + (podeEditar?`<div style="margin-bottom:10px"><button class="btn-primary" onclick="abrirLancamentoManual()">+ Novo lançamento</button></div>`:'<p style="font-size:12px;color:#9ca3af;margin-bottom:10px">Você tem acesso de leitura. A edição depende de permissão de lançamento.</p>')
+    + `<div class="filter-bar" style="flex-wrap:wrap;gap:8px">
+        <input class="filter-input" placeholder="🔎 buscar descrição, conta, categoria, fazenda" value="${escapeHtml(f.busca)}" oninput="lancFiltro.busca=this.value" onchange="setLancFiltro('busca',this.value)" style="min-width:240px">
+        <select class="filter-input" onchange="setLancFiltro('tipo',this.value)"><option value="">Tipo: todos</option><option value="RECEITA" ${f.tipo==='RECEITA'?'selected':''}>Receitas</option><option value="DESPESA" ${f.tipo==='DESPESA'?'selected':''}>Despesas</option></select>
+        <select class="filter-input" onchange="setLancFiltro('faz',this.value)"><option value="">Fazenda: todas</option>${fazendas.map(x=>`<option ${f.faz===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select>
+        <select class="filter-input" onchange="setLancFiltro('cat',this.value)"><option value="">Categoria: todas</option>${cats.map(x=>`<option ${f.cat===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select>
+        <select class="filter-input" onchange="setLancFiltro('sit',this.value)"><option value="">Situação: todas</option><option value="LIQUIDADO" ${f.sit==='LIQUIDADO'?'selected':''}>Pago/Recebido</option><option value="PENDENTE" ${f.sit==='PENDENTE'?'selected':''}>Pendente</option></select>
+        <select class="filter-input" onchange="setLancFiltro('mes',this.value)"><option value="">Mês: todos</option>${meses.map(m=>`<option value="${m}" ${f.mes===m?'selected':''}>${formatMes(m)}</option>`).join('')}</select>
+        ${(f.busca||f.tipo||f.faz||f.cat||f.sit||f.mes)?`<button class="nav-btn" onclick="limparLancFiltro()">limpar filtros</button>`:''}
+      </div>`
+    + `<div class="kpi-grid" style="margin:12px 0">
+        <div class="kpi"><div class="kpi-label">Lançamentos</div><div class="kpi-value">${fmtNum(arr.length)}<span style="font-size:12px;color:#9ca3af"> de ${fmtNum(todos.length)}</span></div></div>
+        <div class="kpi"><div class="kpi-label">Receitas (filtro)</div><div class="kpi-value pos">${fmt(rec)}</div></div>
+        <div class="kpi"><div class="kpi-label">Despesas (filtro)</div><div class="kpi-value neg">${fmt(des)}</div></div>
+        <div class="kpi"><div class="kpi-label">Resultado (filtro)</div><div class="kpi-value ${result>=0?'pos':'neg'}">${fmt(result)}</div></div>
+      </div>`
+    + `<div class="widget span-full" style="cursor:default"><div class="widget-body" style="overflow-x:auto">
+        <style>.lanctbl{width:100%;border-collapse:collapse;font-size:13px}.lanctbl th{text-align:left;color:#9ca3af;font-size:11px;text-transform:uppercase;font-weight:700;padding:6px 8px;border-bottom:1px solid #ececf0}.lanctbl td{border-bottom:1px solid #f3f4f6;padding:7px 8px;vertical-align:top}.lanctbl tbody tr:hover{background:#fafafa}</style>
+        <table class="lanctbl">
+          <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Fazenda</th><th>Tipo</th><th style="text-align:right">Valor</th><th>Situação</th><th style="text-align:right">Ações</th></tr></thead>
+          <tbody>${linhas||'<tr><td colspan="8" style="padding:16px;color:#9ca3af;text-align:center">Nenhum lançamento encontrado com esses filtros.</td></tr>'}</tbody>
+        </table>
+        ${arr.length>LIM?`<p style="font-size:12px;color:#9ca3af;margin-top:10px">Mostrando os primeiros ${LIM} de ${fmtNum(arr.length)}. Use os filtros para refinar a busca.</p>`:''}
+      </div></div>`
+}
+function editarLanc(id){
+  if(!podeLancarManual()){ alert('Você não tem permissão para editar lançamentos.'); return }
+  const l = (state.lancamentos||[]).find(x=>x.id===id); if(!l){ alert('Lançamento não encontrado.'); return }
+  const fazendas = [...new Set((state.entidades||[]).map(e=>e.nome).concat((state.lancamentos||[]).map(x=>x.fazenda)).filter(f=>f&&f.trim()))]
+  const optFaz = ['<option value="">— sem fazenda —</option>'].concat(fazendas.map(f=>`<option ${l.fazenda===f?'selected':''}>${escapeHtml(f)}</option>`)).join('')
+  document.getElementById('modalTitle').textContent='Editar Lançamento'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-input" id="le_tipo"><option value="RECEITA" ${l.tipo==='RECEITA'?'selected':''}>Receita</option><option value="DESPESA" ${l.tipo==='DESPESA'?'selected':''}>Despesa</option></select></div>
+      <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="le_data" type="date" value="${l.data||''}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Descrição / Histórico</label><input class="form-input" id="le_desc" value="${escapeHtml(l.descricao||'')}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Valor (R$)</label><input class="form-input" id="le_valor" type="number" step="any" value="${Number(l.valor)||''}"></div>
+      <div class="form-group"><label class="form-label">Situação</label>
+        <select class="form-input" id="le_sit"><option value="">—</option><option value="LIQUIDADO" ${l.situacao==='LIQUIDADO'?'selected':''}>Pago/Recebido</option><option value="PENDENTE" ${l.situacao==='PENDENTE'?'selected':''}>Pendente</option></select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Fazenda</label><select class="form-input" id="le_faz">${optFaz}</select></div>
+      <div class="form-group"><label class="form-label">Centro de Custo</label><input class="form-input" id="le_cc" value="${escapeHtml(l.centroCusto||'')}"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Categoria</label><input class="form-input" id="le_cat" value="${escapeHtml(l.categoria||'')}"></div>
+      <div class="form-group"><label class="form-label">Cabeças</label><input class="form-input" id="le_cab" type="number" step="any" value="${l.cabecas!=null?l.cabecas:''}"></div>
+      <div class="form-group"><label class="form-label">Arrobas</label><input class="form-input" id="le_arr" type="number" step="any" value="${l.arrobas!=null?l.arrobas:''}"></div>
+    </div>
+    <div id="le_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-primary" style="flex:1" onclick="salvarEditarLanc('${id}')">Salvar alterações</button>
+      <button class="nav-btn" style="color:#dc2626" onclick="excluirLanc('${id}')">Excluir</button>
+    </div>`
+}
+function salvarEditarLanc(id){
+  const l = (state.lancamentos||[]).find(x=>x.id===id); if(!l) return
+  const valor=parseFloat(document.getElementById('le_valor').value)
+  const desc=document.getElementById('le_desc').value.trim()
+  const erro=document.getElementById('le_erro')
+  if(isNaN(valor)||valor<=0){ erro.textContent='Informe um valor válido.'; return }
+  if(!desc){ erro.textContent='Informe a descrição.'; return }
+  l.tipo=document.getElementById('le_tipo').value
+  l.data=document.getElementById('le_data').value||null
+  l.descricao=desc
+  l.valor=Math.abs(valor)
+  l.situacao=document.getElementById('le_sit').value||null
+  l.fazenda=document.getElementById('le_faz').value
+  l.centroCusto=document.getElementById('le_cc').value.trim()
+  const cat=document.getElementById('le_cat').value.trim()
+  l.categoria = cat || classificarCategoria(desc,l.tipo)
+  const cab=parseFloat(document.getElementById('le_cab').value); l.cabecas=isNaN(cab)?null:cab
+  const ar=parseFloat(document.getElementById('le_arr').value); l.arrobas=isNaN(ar)?null:ar
+  saveState()
+  registrarEvento('lancamento', `Editado: ${desc} — ${fmt(Math.abs(valor))}`)
+  filteredLancamentos=[...state.lancamentos]
+  closeModal()
+  renderAll()
+  if(currentModule==='lancamentos') renderModLancamentos(document.getElementById('viewGeneric'))
+}
+function excluirLanc(id){
+  if(!podeLancarManual()){ alert('Você não tem permissão para excluir lançamentos.'); return }
+  const l=(state.lancamentos||[]).find(x=>x.id===id); if(!l) return
+  if(!confirm(`Excluir o lançamento "${l.descricao||''}" (${fmt(Number(l.valor)||0)})?\n\nEsta ação não pode ser desfeita.`)) return
+  state.lancamentos = state.lancamentos.filter(x=>x.id!==id)
+  filteredLancamentos = (filteredLancamentos||[]).filter(x=>x.id!==id)
+  saveState()
+  registrarEvento('lancamento', `Excluído: ${l.descricao||''} — ${fmt(Number(l.valor)||0)}`)
+  closeModal()
+  renderAll()
+  if(currentModule==='lancamentos') renderModLancamentos(document.getElementById('viewGeneric'))
 }
 
 // ============================================================
