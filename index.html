@@ -1714,11 +1714,47 @@ function agroResumo(){
   return { area, sacas, kg, custo, receitaEst, culturas }
 }
 
+// ============================================================
+// PREFERÊNCIAS POR USUÁRIO (salvas na nuvem — seguem o login em qualquer dispositivo)
+// ============================================================
+let userPrefs = null
+let _prefTimer = null
+async function carregarPrefs(){
+  userPrefs = {}
+  if (typeof cloudUser==='undefined' || !cloudUser) return
+  try { const c = JSON.parse(LS.getItem('prefs_'+cloudUser.id)||'{}'); if(c&&typeof c==='object') userPrefs=c } catch(e){}
+  try {
+    const { data } = await sb.from('preferencias').select('conteudo').eq('usuario', cloudUser.id).maybeSingle()
+    if (data && data.conteudo && typeof data.conteudo==='object') userPrefs = data.conteudo
+  } catch(e){ /* tabela ainda não criada → usa cache local */ }
+  migrarPrefsLegado()
+  try { layout = loadLayout() } catch(e){}
+}
+function migrarPrefsLegado(){
+  if (userPrefs && Object.keys(userPrefs).length) return   // já há prefs salvas
+  let mud=false
+  const tryJSON = v => { try{ return JSON.parse(v) }catch(e){ return v } }
+  const a = LS.getItem('dre_layout_v1');     if(a!=null){ userPrefs.layout=tryJSON(a); mud=true }
+  const b = LS.getItem('dre_charttypes_v1'); if(b!=null){ userPrefs.charttypes=tryJSON(b); mud=true }
+  const c = LS.getItem('dre_kpis_v1');       if(c!=null){ userPrefs.kpis=tryJSON(c); mud=true }
+  const d = LS.getItem('dre_kpis_view');     if(d!=null){ userPrefs.kpiview=d; mud=true }
+  const e = LS.getItem('dre_lancview');      if(e!=null){ userPrefs.lancview=e; mud=true }
+  if(mud) salvarPrefs()
+}
+function salvarPrefs(){
+  if (typeof cloudUser==='undefined' || !cloudUser) return
+  try { LS.setItem('prefs_'+cloudUser.id, JSON.stringify(userPrefs||{})) } catch(e){}
+  clearTimeout(_prefTimer)
+  _prefTimer = setTimeout(async ()=>{ try{ await sb.from('preferencias').upsert({ usuario:cloudUser.id, conteudo:userPrefs||{}, atualizado_em:new Date().toISOString() }) }catch(e){} }, 600)
+}
+function prefGet(key, def){ return (userPrefs && Object.prototype.hasOwnProperty.call(userPrefs,key)) ? userPrefs[key] : def }
+function prefSet(key, val){ if(!userPrefs) userPrefs={}; userPrefs[key]=val; salvarPrefs() }
+
 const LAYOUT_KEY = 'dre_layout_v1'
 
 function loadLayout() {
   try {
-    const saved = JSON.parse(LS.getItem(LAYOUT_KEY) || '{}')
+    const saved = prefGet('layout', {}) || {}
     return WIDGET_DEFS.map((w,i) => ({
       ...w,
       visible: saved[w.id]?.visible ?? true,
@@ -1730,7 +1766,7 @@ function loadLayout() {
 function saveLayout(layout) {
   const obj = {}
   layout.forEach((w,i) => { obj[w.id] = { visible: w.visible, order: i } })
-  LS.setItem(LAYOUT_KEY, JSON.stringify(obj))
+  prefSet('layout', obj)
 }
 
 let layout = loadLayout()
@@ -1850,7 +1886,7 @@ function toggleWidget(id, visible) {
 }
 
 function resetLayout() {
-  LS.removeItem(LAYOUT_KEY)
+  prefSet('layout', {})
   layout = loadLayout()
   openSettings()
   renderDashboard()
@@ -2083,9 +2119,9 @@ const CHART_TYPES = {
   lanc_cat:    { def:'doughnut', opts:[['doughnut','Rosca'],['pie','Pizza'],['bar','Barra']] },
 }
 const CHART_KEY = 'dre_charttypes_v1'
-function _chartTypes(){ try{ return JSON.parse(LS.getItem(CHART_KEY))||{} }catch(e){ return {} } }
+function _chartTypes(){ return prefGet('charttypes', {}) || {} }
 function getCType(id){ const def = CHART_TYPES[id] ? CHART_TYPES[id].def : 'bar'; return _chartTypes()[id] || def }
-function setCType(id,t){ const c=_chartTypes(); c[id]=t; LS.setItem(CHART_KEY,JSON.stringify(c)); rerenderModuloAtual() }
+function setCType(id,t){ const c={..._chartTypes()}; c[id]=t; prefSet('charttypes', c); rerenderModuloAtual() }
 function rerenderModuloAtual(){
   if (typeof currentModule==='undefined' || currentModule==='dashboard'){ renderDashboard(); return }
   const m = MODULES.find(x=>x.id===currentModule)
@@ -2119,12 +2155,12 @@ const KPI_KEY = 'dre_kpis_v1'
 const KPI_VIEW_KEY = 'dre_kpis_view'
 const KPI_DEFAULT = ['receita','despesa','resultado','ebitda','margem','pctDespesa']
 function kpisVisiveis() {
-  try { const s = JSON.parse(LS.getItem(KPI_KEY)); if (Array.isArray(s)) return s } catch(e){}
-  return KPI_DEFAULT.slice()
+  const s = prefGet('kpis', null)
+  return Array.isArray(s) ? s : KPI_DEFAULT.slice()
 }
-function setKpisVisiveis(arr) { LS.setItem(KPI_KEY, JSON.stringify(arr)) }
-function kpiView(){ return LS.getItem(KPI_VIEW_KEY) || 'cards' }
-function setKpiView(v){ LS.setItem(KPI_VIEW_KEY, v); renderDashboard() }
+function setKpisVisiveis(arr) { prefSet('kpis', arr) }
+function kpiView(){ return prefGet('kpiview','cards') }
+function setKpiView(v){ prefSet('kpiview', v); renderDashboard() }
 function fmtKpi(tipo, val){ return tipo==='percent' ? fmtPct(val) : tipo==='number' ? fmtNum(val) : fmt(val) }
 
 function htmlKpis(d) {
@@ -3397,6 +3433,7 @@ function aplicarTema(){
 function iniciarApp() {
   document.getElementById('loginOverlay').classList.add('hidden')
   document.getElementById('clienteOverlay').classList.add('hidden')
+  try { layout = loadLayout() } catch(e){}
   aplicarTema()
   buildNav()
   // primeira aba que o usuário pode acessar
@@ -4363,8 +4400,8 @@ function salvarLancamentoManual(){
 // MÓDULO: LANÇAMENTOS (ver todos / corrigir / excluir)
 // ============================================================
 let lancFiltro = { busca:'', tipo:'', faz:'', cat:'', sit:'', mes:'' }
-function getLancView(){ return LS.getItem('dre_lancview') || 'tabela' }
-function setLancView(v){ LS.setItem('dre_lancview', v); renderModLancamentos(document.getElementById('viewGeneric')) }
+function getLancView(){ return prefGet('lancview','tabela') }
+function setLancView(v){ prefSet('lancview', v); renderModLancamentos(document.getElementById('viewGeneric')) }
 function fmtDataBR(s){ if(!s) return '—'; const p=String(s).split('-'); return p.length===3 ? `${p[2]}/${p[1]}/${p[0].slice(2)}` : s }
 function garantirIdsLancamentos(){ let mud=false; (state.lancamentos||[]).forEach(l=>{ if(!l.id){ l.id='l_'+Math.random().toString(36).slice(2,10); mud=true } }); if(mud) saveState() }
 function setLancFiltro(campo,val){ lancFiltro[campo]=val; renderModLancamentos(document.getElementById('viewGeneric')) }
@@ -4678,6 +4715,7 @@ async function bootCloud(){
   document.getElementById('loginLogo').src = document.querySelector('.logo img').src
   const u = await carregarPerfil()
   if (!u || u.erro){ buildNav(); mostrarLogin(); return }
+  await carregarPrefs()   // preferências do usuário (layout, gráficos, KPIs) — seguem o login
   if (u.perfil === 'suporte'){
     // mantém o suporte no último cliente acessado (continua logado/configurado até sair)
     const last = LS.getItem('dre_last_ws')
