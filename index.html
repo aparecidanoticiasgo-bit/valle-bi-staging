@@ -4204,7 +4204,7 @@ async function renderModMercado(c){
   const cotProd = id => { const h = rows.filter(r=>r.produto===id).sort((x,y)=>(x.data<y.data?1:-1))[0]; return h?h.valor:0 }
   const cotSoja = cotProd('soja'), cotMilho = cotProd('milho')
   const cultAgro = agroPorCultura()
-  let totCad = 0, totMerc = 0, usouMercado = false
+  let totCad = 0, totMerc = 0, totCusto = 0, usouMercado = false
   const linhasAgro = cultAgro.map(c=>{
     const un = c.sc>0 ? 'sc' : (c.kg>0 ? 'kg' : 'sc')
     const qtd = un==='kg' ? c.kg : c.sc
@@ -4213,20 +4213,24 @@ async function renderModMercado(c){
     let vMerc = c.receita, flag = false
     if (nome==='soja'  && cotSoja){  vMerc = c.sc*cotSoja;  flag = true; usouMercado = true }
     else if (nome==='milho' && cotMilho){ vMerc = c.sc*cotMilho; flag = true; usouMercado = true }
-    totCad += c.receita; totMerc += vMerc
+    const margem = vMerc - c.custo
+    totCad += c.receita; totMerc += vMerc; totCusto += c.custo
     return `<tr>
       <td style="padding:6px 6px;font-weight:600">${escapeHtml(c.cultura)}</td>
       <td style="padding:6px 6px;text-align:right;color:#6b7280">${fmtNum(c.area)} ha</td>
       <td style="padding:6px 6px;text-align:right">${prodTxt}</td>
       <td style="padding:6px 6px;text-align:right">${c.receita?fmt(c.receita):'—'}</td>
       <td style="padding:6px 6px;text-align:right;color:#16a34a;font-weight:600">${vMerc?fmt(vMerc):'—'}${flag?' <span title="reavaliado pela cotação CEPEA" style="color:#9ca3af;cursor:help">•</span>':''}</td>
+      <td style="padding:6px 6px;text-align:right;font-weight:600;color:${margem>=0?'#16a34a':'#dc2626'}">${(vMerc||c.custo)?fmt(margem):'—'}</td>
     </tr>`
   }).join('')
+  const margemTot = totMerc - totCusto
   const agroCard = modCard('Valor da Produção Agrícola', `
     <div class="kpi-grid" style="margin-bottom:12px">
       <div class="kpi"><div class="kpi-label">Área Plantada</div><div class="kpi-value blue">${fmtNum(ag.area)} <span style="font-size:11px;color:#9ca3af">ha</span></div></div>
       <div class="kpi"><div class="kpi-label">Valor (preço cadastrado)</div><div class="kpi-value pos">${totCad?fmt(totCad):'—'}</div></div>
       <div class="kpi"><div class="kpi-label">Valor a mercado</div><div class="kpi-value pos">${totMerc?fmt(totMerc):'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Margem a mercado</div><div class="kpi-value ${margemTot>=0?'pos':'neg'}">${(totMerc||totCusto)?fmt(margemTot):'—'}</div></div>
     </div>
     ${ag.area<=0 ? '<p style="font-size:12px;color:#9ca3af">Cadastre safras no módulo Agricultura para calcular.</p>' : `
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -4236,10 +4240,11 @@ async function renderModMercado(c){
         <th style="text-align:right;padding:4px 6px">Produção</th>
         <th style="text-align:right;padding:4px 6px">Valor cadastrado</th>
         <th style="text-align:right;padding:4px 6px">Valor a mercado</th>
+        <th style="text-align:right;padding:4px 6px">Margem</th>
       </tr></thead>
       <tbody>${linhasAgro}</tbody>
     </table></div>`}
-    ${usouMercado?'<p style="font-size:11px;color:#9ca3af;margin-top:8px">• Soja/Milho reavaliados pela cotação CEPEA atual; demais culturas pelo preço cadastrado.</p>':''}
+    <p style="font-size:11px;color:#9ca3af;margin-top:8px">Margem = valor a mercado − custo da cultura (informe o custo no módulo Agricultura).${usouMercado?' • Soja/Milho reavaliados pela cotação CEPEA atual; demais culturas pelo preço cadastrado.':''}</p>
   `)
 
   // cotações oficiais CEPEA/ESALQ ao vivo (usuário escolhe produto + estado/praça)
