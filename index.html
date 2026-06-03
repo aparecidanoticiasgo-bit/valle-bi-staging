@@ -398,6 +398,17 @@
   </div>
 </div>
 
+<!-- POPUP DE COMUNICADO (Suporte Valle → usuários) -->
+<div id="avisoOverlay" class="modal-overlay hidden" style="z-index:400" onclick="if(event.target===this)fecharAviso()">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <h2 id="avisoTitulo">Comunicado</h2>
+      <button class="modal-close" onclick="fecharAviso()">×</button>
+    </div>
+    <div class="modal-body" id="avisoBody"></div>
+  </div>
+</div>
+
 <script>
 // ============================================================
 // ESTADO GLOBAL
@@ -726,6 +737,7 @@ const ICON = {
   comparativo:_svg('<line x1="4" y1="20" x2="4" y2="10"/><line x1="10" y1="20" x2="10" y2="4"/><line x1="16" y1="20" x2="16" y2="13"/><line x1="20" y1="20" x2="20" y2="7"/>'),
   alertas:    _svg('<path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/>'),
   regras:     _svg('<line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="15" cy="17" r="2"/>'),
+  comunicados:_svg('<path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M16 8a4 4 0 0 1 0 8M18.5 5.5a7 7 0 0 1 0 13"/>'),
 }
 
 const MODULES = [
@@ -747,6 +759,7 @@ const MODULES = [
   { id:'entidades',    label:'Cadastros',      icon:ICON.entidades,   kind:'entidades' },
   { id:'usuarios',     label:'Usuários',       icon:ICON.usuarios,    kind:'generic',  render:renderModUsuarios, adminOnly:true },
   { id:'empresas',     label:'Empresas',       icon:ICON.empresas,    kind:'generic',  render:renderModEmpresas, suporteOnly:true },
+  { id:'comunicados',  label:'Comunicados',    icon:ICON.comunicados, kind:'generic',  render:renderModComunicados, suporteOnly:true },
   { id:'personalizacao', label:'Personalização', icon:ICON.tema,      kind:'generic',  render:renderModPersonalizacao, suporteOnly:true },
 ]
 
@@ -3338,6 +3351,7 @@ function iniciarApp() {
   } else {
     showView(currentModule)
   }
+  try { verificarComunicados() } catch(e){}
 }
 
 // ----- Trocar senha -----
@@ -3540,7 +3554,7 @@ function dadosApp(){
   return { entidades:state.entidades||[], importacoes:state.importacoes||[], lancamentos:state.lancamentos||[],
            regrasCategoria:state.regrasCategoria||[], alertas:state.alertas||[],
            pastos:state.pastos||[], movimentos:state.movimentos||[], categoriasAnimal:state.categoriasAnimal||null,
-           tema:state.tema||null }
+           tema:state.tema||null, cepea:state.cepea||null }
 }
 
 // override: identidade vem do Supabase
@@ -3580,7 +3594,7 @@ async function carregarDados(ws){
   state = { entidades:c.entidades||[], importacoes:c.importacoes||[], lancamentos:c.lancamentos||[],
             usuarios:[], sessao:null, regrasCategoria:c.regrasCategoria||[], alertas:c.alertas||[],
             pastos:c.pastos||[], movimentos:c.movimentos||[], categoriasAnimal:c.categoriasAnimal||null,
-            tema:c.tema||null }
+            tema:c.tema||null, cepea:c.cepea||null }
   filteredLancamentos = [...state.lancamentos]
 }
 
@@ -3953,6 +3967,58 @@ const PRODUTOS_COT = [
 
 const UFS = ['BR','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
 let mercadoUF = 'TODOS'
+
+// ---- Cotações oficiais CEPEA/ESALQ (widget oficial embutido por iframe) ----
+// id = id_indicador do widget CEPEA; muitos trazem o estado/praça no próprio item.
+const CEPEA_INDICADORES = [
+  { id:'2',  nome:'Boi Gordo (SP/B3)' },
+  { id:'3',  nome:'Bezerro - SP' },
+  { id:'8',  nome:'Bezerro - MS' },
+  { id:'12', nome:'Soja - PR' },
+  { id:'92', nome:'Soja - Paranaguá' },
+  { id:'77', nome:'Milho' },
+  { id:'54', nome:'Algodão' },
+  { id:'91', nome:'Arroz' },
+  { id:'23', nome:'Café Arábica' },
+  { id:'24', nome:'Café Robusta' },
+  { id:'178',nome:'Trigo - PR' },
+  { id:'179',nome:'Trigo - RS' },
+  { id:'72', nome:'Mandioca' },
+  { id:'162',nome:'Citros' },
+  { id:'leitep', nome:'Leite' },
+  { id:'130',nome:'Frango Resfriado' },
+  { id:'181',nome:'Frango Congelado' },
+  { id:'129-1', nome:'Suíno - SP' },
+  { id:'129-10',nome:'Suíno - MG' },
+  { id:'129-6', nome:'Suíno - PR' },
+  { id:'129-4', nome:'Suíno - RS' },
+  { id:'129-5', nome:'Suíno - SC' },
+  { id:'53', nome:'Açúcar - SP' },
+  { id:'50', nome:'Açúcar - AL' },
+  { id:'35', nome:'Açúcar - PE' },
+  { id:'104',nome:'Etanol Anidro - SP' },
+  { id:'103',nome:'Etanol Hidratado - SP' },
+  { id:'119',nome:'Etanol Hidratado - GO' },
+  { id:'76', nome:'Etanol Hidratado - MT' },
+  { id:'305-MS', nome:'Ovino - MS' },
+  { id:'305-MT', nome:'Ovino - MT' },
+  { id:'305-SP', nome:'Ovino - SP' },
+]
+function cepeaSel(){ const a = (state.cepea && state.cepea.length) ? state.cepea : ['2','92','77']; return a.filter(id=>CEPEA_INDICADORES.some(i=>i.id===id)) }
+function cepeaAdd(id){ if(!id) return; const a = cepeaSel().slice(); if(!a.includes(id)){ a.push(id); state.cepea = a; saveState(); renderModMercado(document.getElementById('viewGeneric')) } }
+function cepeaDel(id){ state.cepea = cepeaSel().filter(x=>x!==id); saveState(); renderModMercado(document.getElementById('viewGeneric')) }
+function montarCepea(){
+  const frame = document.getElementById('cepeaFrame'); if(!frame) return
+  const ids = cepeaSel()
+  if(!ids.length){ frame.style.display='none'; return }
+  frame.style.display='block'
+  const qs = ids.map(id=>'id_indicador%5B%5D='+encodeURIComponent(id)).join('&')
+  const src = 'https://www.cepea.org.br/br/widgetproduto.js.php?'+qs+'&fonte=arial&tamanho=13&largura=100%25&corfundo=ffffff&cortexto=1d1d1f&corlinha=f5f5f7'
+  const doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif}table{width:100%}</style></head><body><script src="'+src+'"><\/script></body></html>'
+  frame.srcdoc = doc
+  frame.onload = ()=>{ try{ const h = frame.contentDocument.body.scrollHeight; if(h>40) frame.style.height = (h+8)+'px' }catch(e){} }
+}
+
 async function renderModMercado(c){
   c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias e valor do rebanho') +
     '<p style="color:#9ca3af;font-size:13px">Carregando cotações...</p>'
@@ -4027,15 +4093,34 @@ async function renderModMercado(c){
     ${usouMercado?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Soja/Milho reavaliados pela cotação atual; demais culturas pelo preço cadastrado.</p>':''}
   `)
 
+  // cotações oficiais CEPEA/ESALQ ao vivo (usuário escolhe produto + estado/praça)
+  const cepeaIds = cepeaSel()
+  const cepeaChips = cepeaIds.map(id=>{ const it=CEPEA_INDICADORES.find(i=>i.id===id); return `<span style="display:inline-flex;align-items:center;gap:6px;background:#f5f5f7;border:1px solid #ececf0;border-radius:999px;padding:4px 6px 4px 12px;font-size:12px;color:#1d1d1f">${it?it.nome:id}<button onclick="cepeaDel('${id}')" title="remover" style="border:none;background:none;cursor:pointer;color:#86868b;font-size:15px;line-height:1;padding:0 2px">×</button></span>` }).join('')
+  const cepeaOpts = CEPEA_INDICADORES.filter(i=>!cepeaIds.includes(i.id)).map(i=>`<option value="${i.id}">${i.nome}</option>`).join('')
+  const cepeaCard = modCard('Cotações CEPEA/ESALQ — oficiais, ao vivo', `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+      <select id="cepeaSelect" class="filter-input" style="min-width:220px">
+        <option value="">+ Adicionar produto / estado…</option>
+        ${cepeaOpts}
+      </select>
+      <button class="nav-btn" onclick="cepeaAdd(document.getElementById('cepeaSelect').value)">Adicionar</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${cepeaChips||'<span style="font-size:12px;color:#9ca3af">Nenhum indicador selecionado.</span>'}</div>
+    <iframe id="cepeaFrame" style="width:100%;border:1px solid #ececf0;border-radius:12px;height:300px;background:#fff;display:block" frameborder="0"></iframe>
+    <p style="font-size:11px;color:#9ca3af;margin-top:8px">Fonte: CEPEA/ESALQ-USP — cotações oficiais atualizadas automaticamente. Escolha o produto e o estado/praça desejados.</p>
+  `, 'full')
+
   const botaoAdd = ehAdmin() ? `<div style="margin-bottom:8px"><button class="btn-primary" onclick="novaCotacao()">+ Lançar cotação</button></div>` : ''
 
   c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias por estado e valor do rebanho') +
     botaoAdd + filtroUF +
     `<div class="widget-grid">
-      ${modCard('Cotações atuais'+(mercadoUF!=='TODOS'?' — '+mercadoUF:''), `<div class="kpi-grid">${cards}</div>`)}
+      ${cepeaCard}
+      ${modCard('Cotações manuais'+(mercadoUF!=='TODOS'?' — '+mercadoUF:''), `<div class="kpi-grid">${cards}</div>`)}
       ${rebanhoCard}
       ${agroCard}
     </div>`
+  montarCepea()
 }
 function fmtDataCot(d){ if(!d) return ''; const [y,m,dia]=d.split('-'); return `${dia}/${m}/${y.slice(2)}` }
 
@@ -4212,6 +4297,139 @@ function salvarLancamentoManual(){
   filteredLancamentos=[...state.lancamentos]
   closeModal()
   renderAll()
+}
+
+// ============================================================
+// COMUNICADOS (Suporte Valle → clientes/usuários)
+// ============================================================
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])) }
+function fmtDataHora(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; const p=n=>String(n).padStart(2,'0'); return `${p(d.getDate())}/${p(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}` }
+
+async function renderModComunicados(c){
+  if(!ehSuporte()){ c.innerHTML = pageHeader(ICON.lock,'Acesso restrito','Apenas o Suporte Valle envia comunicados.'); return }
+  c.innerHTML = pageHeader(ICON.comunicados,'Comunicados','Mensagens, imagens e links para todos os clientes ou para um usuário específico')
+    + '<div class="widget-grid"><div class="widget span-full" style="cursor:default"><div class="widget-body"><p style="color:#9ca3af;font-size:13px">Carregando...</p></div></div></div>'
+
+  let usuarios=[], enviados=[]
+  try { const { data } = await sb.from('perfis').select('id,nome,workspace,papel').order('workspace'); usuarios = data||[] } catch(e){}
+  try { const { data } = await sb.from('comunicados').select('*').order('criado_em',{ascending:false}).limit(50); enviados = data||[] } catch(e){}
+
+  const wss = [...new Set(usuarios.map(u=>u.workspace).filter(Boolean))]
+  const optUsuarios = usuarios.map(u=>`<option value="${u.id}">${escapeHtml(u.nome||u.id)} · ${escapeHtml(u.workspace||'')} (${u.papel})</option>`).join('')
+  const optWs = wss.map(w=>`<option value="${escapeHtml(w)}">${escapeHtml(w)}</option>`).join('')
+
+  const form = `
+    <div class="form-group"><label class="form-label">Destino</label>
+      <select class="form-input" id="cm_destino" onchange="comDestinoMuda()">
+        <option value="todos">Todos os clientes e usuários</option>
+        <option value="workspace">Uma empresa (todos os usuários dela)</option>
+        <option value="usuario">Um usuário específico</option>
+      </select>
+    </div>
+    <div class="form-group" id="cm_ws_wrap" style="display:none"><label class="form-label">Empresa</label><select class="form-input" id="cm_ws">${optWs}</select></div>
+    <div class="form-group" id="cm_user_wrap" style="display:none"><label class="form-label">Usuário</label><select class="form-input" id="cm_user">${optUsuarios}</select></div>
+    <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="cm_titulo" maxlength="120" placeholder="Ex.: Manutenção programada"></div>
+    <div class="form-group"><label class="form-label">Mensagem</label><textarea class="form-input" id="cm_msg" rows="4" placeholder="Escreva o comunicado..."></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Link (opcional)</label><input class="form-input" id="cm_link" placeholder="https://..."></div>
+      <div class="form-group"><label class="form-label">Texto do botão</label><input class="form-input" id="cm_linklabel" placeholder="Saiba mais"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Imagem (PNG/JPG, opcional — máx 2MB)</label>
+      <input type="file" id="cm_img" accept="image/png,image/jpeg" onchange="comPreviewImg(this)">
+      <div id="cm_img_prev" style="margin-top:8px"></div>
+    </div>
+    <button class="btn-primary" id="cm_enviar" onclick="enviarComunicado()">Enviar comunicado</button>
+  `
+
+  const lista = enviados.length ? enviados.map(cm=>{
+    const alvo = cm.destino==='todos'?'Todos':(cm.destino==='workspace'?('Empresa: '+escapeHtml(cm.workspace||'')):'Usuário específico')
+    return `<div style="border-bottom:1px solid #ececf0;padding:10px 0">
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <strong style="font-size:14px">${escapeHtml(cm.titulo||'(sem título)')}</strong>
+        <span style="font-size:11px;color:#9ca3af;white-space:nowrap">${fmtDataHora(cm.criado_em)}</span>
+      </div>
+      <div style="font-size:13px;color:#374151;margin:4px 0;white-space:pre-wrap">${escapeHtml((cm.mensagem||'').slice(0,200))}</div>
+      <div style="font-size:11px;color:#9ca3af">${alvo}${cm.imagem_url?' · 🖼 imagem':''}${cm.link?' · 🔗 link':''}
+        <button class="nav-btn" style="padding:2px 8px;margin-left:6px" onclick="excluirComunicado('${cm.id}')">excluir</button></div>
+    </div>`
+  }).join('') : '<p style="font-size:13px;color:#9ca3af">Nenhum comunicado enviado ainda.</p>'
+
+  c.innerHTML = pageHeader(ICON.comunicados,'Comunicados','Mensagens, imagens e links para todos os clientes ou para um usuário específico')
+    + `<div class="widget-grid">
+        ${modCard('Novo comunicado', form, 'half')}
+        ${modCard('Enviados (últimos 50)', lista, 'half')}
+      </div>`
+}
+function comDestinoMuda(){ const d=document.getElementById('cm_destino').value; document.getElementById('cm_ws_wrap').style.display = d==='workspace'?'block':'none'; document.getElementById('cm_user_wrap').style.display = d==='usuario'?'block':'none' }
+function comPreviewImg(inp){ const f=inp.files&&inp.files[0]; const p=document.getElementById('cm_img_prev'); if(!f){ p.innerHTML=''; return } if(f.size>2*1024*1024){ p.innerHTML='<span style="color:#dc2626;font-size:12px">Imagem muito grande (máx 2MB).</span>'; inp.value=''; return } const r=new FileReader(); r.onload=e=>{ p.innerHTML='<img src="'+e.target.result+'" style="max-width:100%;border-radius:10px;border:1px solid #ececf0">' }; r.readAsDataURL(f) }
+
+async function enviarComunicado(){
+  const btn=document.getElementById('cm_enviar')
+  const titulo=document.getElementById('cm_titulo').value.trim()
+  const mensagem=document.getElementById('cm_msg').value.trim()
+  const link=document.getElementById('cm_link').value.trim()
+  const link_label=document.getElementById('cm_linklabel').value.trim()
+  const destino=document.getElementById('cm_destino').value
+  if(!titulo && !mensagem){ alert('Escreva ao menos um título ou uma mensagem.'); return }
+  let workspace=null, destinatario=null
+  if(destino==='workspace'){ workspace=document.getElementById('cm_ws').value; if(!workspace){ alert('Escolha a empresa.'); return } }
+  if(destino==='usuario'){ destinatario=document.getElementById('cm_user').value; if(!destinatario){ alert('Escolha o usuário.'); return } }
+  btn.disabled=true; btn.textContent='Enviando...'
+  let imagem_url=null
+  const inp=document.getElementById('cm_img'); const f=inp&&inp.files&&inp.files[0]
+  if(f){
+    try {
+      const ext=(f.name.split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,'')
+      const path=Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext
+      const { error:upErr } = await sb.storage.from('comunicados').upload(path, f, { contentType:f.type||'image/png', upsert:false })
+      if(upErr) throw upErr
+      const { data:pub } = sb.storage.from('comunicados').getPublicUrl(path)
+      imagem_url = pub.publicUrl
+    } catch(e){ alert('Falha ao enviar a imagem: '+(e.message||e)); btn.disabled=false; btn.textContent='Enviar comunicado'; return }
+  }
+  try {
+    const { error } = await sb.from('comunicados').insert({ autor:cloudUser.nome||cloudUser.email, titulo, mensagem, imagem_url, link:link||null, link_label:link_label||null, destino, workspace, destinatario, ativo:true })
+    if(error) throw error
+    alert('Comunicado enviado com sucesso!')
+    renderModComunicados(document.getElementById('viewGeneric'))
+  } catch(e){ alert('Erro ao enviar: '+(e.message||e)); btn.disabled=false; btn.textContent='Enviar comunicado' }
+}
+async function excluirComunicado(id){
+  if(!confirm('Excluir este comunicado? Ele deixará de aparecer para os usuários.')) return
+  try{ const { error } = await sb.from('comunicados').delete().eq('id',id); if(error) throw error; renderModComunicados(document.getElementById('viewGeneric')) }
+  catch(e){ alert('Erro ao excluir: '+(e.message||e)) }
+}
+
+// --- Popup para os usuários (todos os perfis, exceto o próprio suporte) ---
+let _avisoFila = []
+async function verificarComunicados(){
+  if(!cloudUser || ehSuporte()) return   // suporte é o emissor; não recebe os próprios broadcasts
+  let coms=[]
+  try { const { data, error } = await sb.from('comunicados').select('*').eq('ativo',true).order('criado_em',{ascending:true}); if(error) return; coms = data||[] } catch(e){ return }
+  if(!coms.length) return
+  let lidos=[]
+  try { const { data } = await sb.from('comunicados_lidos').select('comunicado_id').eq('usuario', cloudUser.id); lidos=(data||[]).map(r=>r.comunicado_id) } catch(e){}
+  _avisoFila = coms.filter(cm=> !lidos.includes(cm.id))   // RLS já restringe ao destino do usuário
+  mostrarProximoAviso()
+}
+function mostrarProximoAviso(){
+  const ov=document.getElementById('avisoOverlay'); if(!ov) return
+  if(!_avisoFila.length){ ov.classList.add('hidden'); return }
+  const cm=_avisoFila[0]
+  document.getElementById('avisoTitulo').textContent = cm.titulo||'Comunicado'
+  let html=''
+  if(cm.imagem_url) html+=`<img src="${escapeHtml(cm.imagem_url)}" style="max-width:100%;border-radius:12px;border:1px solid #ececf0;margin-bottom:12px">`
+  if(cm.mensagem) html+=`<div style="font-size:14px;color:#1d1d1f;line-height:1.55;white-space:pre-wrap;margin-bottom:14px">${escapeHtml(cm.mensagem)}</div>`
+  if(cm.link) html+=`<a href="${escapeHtml(cm.link)}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;margin-bottom:8px">${escapeHtml(cm.link_label||'Abrir link')}</a>`
+  html+=`<div style="font-size:11px;color:#9ca3af;margin-top:10px">Comunicado da Valle Soluções e Gestão${cm.autor?(' · '+escapeHtml(cm.autor)):''} · ${fmtDataHora(cm.criado_em)}</div>`
+  html+=`<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">${_avisoFila.length>1?`<span style="align-self:center;font-size:11px;color:#9ca3af">${_avisoFila.length} comunicados</span>`:''}<button class="btn-primary" onclick="fecharAviso()">OK, entendi</button></div>`
+  document.getElementById('avisoBody').innerHTML = html
+  ov.classList.remove('hidden')
+}
+async function fecharAviso(){
+  const cm=_avisoFila.shift()
+  if(cm && cloudUser){ try{ await sb.from('comunicados_lidos').upsert({ comunicado_id:cm.id, usuario:cloudUser.id }) }catch(e){} }
+  mostrarProximoAviso()
 }
 
 // ============================================================
