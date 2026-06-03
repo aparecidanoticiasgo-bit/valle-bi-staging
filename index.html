@@ -1125,9 +1125,117 @@ function renderUploadStep() {
       <div class="upload-compat">Compatível com Agro1, Aegro, Siagri, Totvs, Sankhya e planilhas próprias</div>
     </div>
     <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFile(this.files[0])">
+    <div style="text-align:center;margin:14px 0;color:#9ca3af;font-size:12px">— ou —</div>
+    <div class="upload-area" style="padding:24px" onclick="document.getElementById('nfeInput').click()"
+      ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')"
+      ondrop="event.preventDefault();this.classList.remove('drag');handleNFeFiles(event.dataTransfer.files)">
+      <div class="upload-icon">📄</div>
+      <div class="upload-title">Importar Notas Fiscais (NF-e XML)</div>
+      <div class="upload-sub">Arraste os arquivos .xml das notas (pode selecionar vários)</div>
+      <div class="upload-compat">Lê emitente, valor, CFOP e classifica receita/despesa automaticamente</div>
+    </div>
+    <input type="file" id="nfeInput" accept=".xml" multiple onchange="handleNFeFiles(this.files)">
     <div id="uploadError" style="color:var(--red);font-size:13px;margin-top:10px;text-align:center"></div>
     `}
   `
+}
+
+// ===== IMPORTADOR DE NF-e (XML) =====
+function parseNFe(xmlText){
+  const doc=new DOMParser().parseFromString(xmlText,'text/xml')
+  if(doc.getElementsByTagName('infNFe').length===0 && doc.getElementsByTagName('NFe').length===0) return null
+  const t=(tag,ctx)=>{ const el=(ctx||doc).getElementsByTagName(tag)[0]; return el?el.textContent.trim():'' }
+  const dh=t('dhEmi')||t('dEmi'); const data=dh?dh.substring(0,10):null
+  const emit=doc.getElementsByTagName('emit')[0]; const dest=doc.getElementsByTagName('dest')[0]
+  const dets=[...doc.getElementsByTagName('det')]
+  return {
+    nNF:t('nNF'), data, natOp:t('natOp'),
+    emitNome:emit?t('xNome',emit):'', emitCnpj:emit?(t('CNPJ',emit)||t('CPF',emit)):'',
+    destNome:dest?t('xNome',dest):'', destCnpj:dest?(t('CNPJ',dest)||t('CPF',dest)):'',
+    vNF:parseFloat(t('vNF'))||0, cfop:dets.length?t('CFOP',dets[0]):'',
+    produtos:dets.map(d=>({desc:t('xProd',d),valor:parseFloat(t('vProd',d))||0,cfop:t('CFOP',d)}))
+  }
+}
+function tipoNFe(nfe,cnpjEmpresa){
+  const dig=s=>(s||'').replace(/\D/g,''); const ce=dig(cnpjEmpresa)
+  if(ce){ if(dig(nfe.emitCnpj)===ce) return 'RECEITA'; if(dig(nfe.destCnpj)===ce) return 'DESPESA' }
+  const f=(nfe.cfop||'')[0]
+  if(['5','6','7'].includes(f)) return 'RECEITA'
+  if(['1','2','3'].includes(f)) return 'DESPESA'
+  return 'DESPESA'
+}
+function handleNFeFiles(files){
+  files=[...files].filter(f=>/\.xml$/i.test(f.name))
+  if(!files.length){ document.getElementById('uploadError').textContent='Selecione arquivos .xml de NF-e.'; return }
+  const sel=document.getElementById('entidadeSelect')
+  window._nfeEnt = sel?sel.value:''
+  if(state.entidades.length && !window._nfeEnt){ document.getElementById('uploadError').textContent='Selecione a entidade antes de importar.'; return }
+  let pend=files.length; window._nfeData=[]
+  files.forEach(f=>{
+    const r=new FileReader()
+    r.onload=ev=>{ try{ const nfe=parseNFe(ev.target.result); if(nfe&&nfe.vNF>0) window._nfeData.push(nfe) }catch(e){}; if(--pend===0) renderNFeValidacao() }
+    r.onerror=()=>{ if(--pend===0) renderNFeValidacao() }
+    r.readAsText(f)
+  })
+}
+function renderNFeValidacao(){
+  const dados=window._nfeData||[]
+  if(!dados.length){ document.getElementById('uploadError').textContent='Nenhuma NF-e válida encontrada nos arquivos.'; return }
+  dados.sort((a,b)=>(a.data<b.data?-1:1))
+  document.getElementById('modalTitle').textContent='Conferir Notas Fiscais'
+  const linhas=dados.map((n,i)=>{
+    const tp=tipoNFe(n,window._nfeCnpj||'')
+    const contra = tp==='RECEITA'? (n.destNome||'—') : (n.emitNome||'—')
+    return `<tr style="border-top:1px solid #f3f4f6">
+      <td style="padding:6px 8px">${n.data?fmtDataCot(n.data):'—'}</td>
+      <td style="padding:6px 8px">${n.nNF||'—'}</td>
+      <td style="padding:6px 8px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${contra}">${contra}</td>
+      <td style="padding:6px 8px;text-align:right">${fmt(n.vNF)}</td>
+      <td style="padding:6px 8px"><select class="form-input" style="padding:4px 8px;font-size:12px" id="nfe_tp_${i}">
+        <option value="RECEITA" ${tp==='RECEITA'?'selected':''}>Receita</option>
+        <option value="DESPESA" ${tp==='DESPESA'?'selected':''}>Despesa</option>
+        <option value="IGNORAR">Ignorar</option></select></td></tr>`
+  }).join('')
+  const totR=dados.filter(n=>tipoNFe(n,window._nfeCnpj||'')==='RECEITA').reduce((s,n)=>s+n.vNF,0)
+  const totD=dados.filter(n=>tipoNFe(n,window._nfeCnpj||'')==='DESPESA').reduce((s,n)=>s+n.vNF,0)
+  document.getElementById('modalBody').innerHTML = `
+    <div style="background:#eeedf8;border:1px solid #c8c6e8;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center">
+      <span style="font-size:20px">📄</span><div><strong>${dados.length} notas lidas</strong>
+      <div style="font-size:12px;color:#6b7280">Receitas ${fmt(totR)} · Despesas ${fmt(totD)}</div></div>
+    </div>
+    <div class="form-group"><label class="form-label">CNPJ da empresa (opcional — melhora a classificação)</label>
+      <input class="form-input" id="nfe_cnpj" value="${window._nfeCnpj||''}" placeholder="só números" onchange="window._nfeCnpj=this.value;renderNFeValidacao()"></div>
+    <div style="overflow:auto;max-height:46vh;border:1px solid #eef0f3;border-radius:10px">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="background:#f9fafb;text-align:left"><th style="padding:7px 8px">Data</th><th style="padding:7px 8px">NF</th><th style="padding:7px 8px">Contraparte</th><th style="padding:7px 8px;text-align:right">Valor</th><th style="padding:7px 8px">Tipo</th></tr></thead>
+        <tbody>${linhas}</tbody></table>
+    </div>
+    <div id="nfeErro" style="color:#dc2626;font-size:12px;min-height:16px;margin-top:8px"></div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn-secondary" onclick="renderUploadStep()">← Voltar</button>
+      <button class="btn-primary" style="flex:1" onclick="confirmarImportNFe()">Importar notas</button>
+    </div>`
+}
+function confirmarImportNFe(){
+  const dados=window._nfeData||[]
+  const id='nfe_'+Date.now()
+  const lans=[]
+  dados.forEach((n,i)=>{
+    const tp=document.getElementById('nfe_tp_'+i)?.value
+    if(tp==='IGNORAR'||!tp) return
+    const contra = tp==='RECEITA'?(n.destNome||''):(n.emitNome||'')
+    const desc = (n.natOp||(tp==='RECEITA'?'Venda':'Compra'))+' - '+contra+(n.nNF?(' (NF '+n.nNF+')'):'')
+    lans.push({ id:'l_'+Math.random().toString(36).slice(2), importacaoId:id, data:n.data,
+      conta:'', descricao:desc, centroCusto:'', fazenda:'', valor:Math.abs(n.vNF), tipo:tp,
+      categoria:classificarCategoria(desc+' '+n.produtos.map(p=>p.desc).join(' '), tp),
+      cabecas:null, arrobas:null, peso:null, situacao:'LIQUIDADO', origem:'nfe' })
+  })
+  if(!lans.length){ document.getElementById('nfeErro').textContent='Nenhuma nota marcada para importar.'; return }
+  state.importacoes.push({ id, nome:'NF-e ('+lans.length+' notas)', periodo:null, entidadeId:window._nfeEnt||null, data:new Date().toISOString() })
+  state.lancamentos.push(...lans)
+  saveState()
+  if(typeof registrarEvento==='function') registrarEvento('import', `NF-e: ${lans.length} notas`)
+  closeModal(); renderAll()
 }
 
 function handleDrop(e) {
