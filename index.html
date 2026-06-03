@@ -2274,7 +2274,8 @@ const CAT_ANIMAL_PADRAO = ['Vaca','Novilha','Bezerro M','Bezerro F','Garrote','B
 function catsAnimal(){ return (state.categoriasAnimal && state.categoriasAnimal.length) ? state.categoriasAnimal : CAT_ANIMAL_PADRAO }
 const MOV_ENTRADA = ['saldo_inicial','compra','nascimento','entrada']
 const MOV_SAIDA = ['venda','morte','saida']
-const MOV_LABEL = { saldo_inicial:'Saldo inicial', compra:'Compra', nascimento:'Nascimento', entrada:'Entrada', venda:'Venda', morte:'Morte', saida:'Saída', transferencia:'Transferência' }
+const MOV_LABEL = { saldo_inicial:'Saldo inicial', compra:'Compra', nascimento:'Nascimento', entrada:'Entrada', venda:'Venda', morte:'Morte', saida:'Saída', transferencia:'Transferência', pesagem:'Pesagem' }
+const UA_KG = 450 // 1 Unidade Animal = 450 kg
 let estoqueView = 'resumo'
 
 function calcEstoque(){
@@ -2285,6 +2286,7 @@ function calcEstoque(){
   ;(state.pastos||[]).forEach(p=>novo(p.id))
   const add = (pid,cat,q)=>{ if(!pid) return; if(!porPasto[pid]) novo(pid); porPasto[pid][cat]=(porPasto[pid][cat]||0)+q; porPasto[pid].total+=q; if(porCategoria[cat]===undefined)porCategoria[cat]=0; porCategoria[cat]+=q }
   ;(state.movimentos||[]).forEach(m=>{
+    if(m.tipo==='pesagem') return // pesagem não altera saldo
     const q=Number(m.qtd)||0, cat=m.categoria
     if(m.tipo==='transferencia'){ add(m.pastoId,cat,-q); add(m.pastoDestinoId,cat,q) }
     else if(MOV_SAIDA.includes(m.tipo)){ add(m.pastoId,cat,-q) }
@@ -2294,12 +2296,57 @@ function calcEstoque(){
   return { cats, porCategoria, porPasto, total }
 }
 
+// ----- Indicadores de desempenho (Onda 2) -----
+function pesoMedioPasto(pid){
+  // último movimento com peso>0 nesse pasto
+  const ms=(state.movimentos||[]).filter(m=>m.pastoId===pid && Number(m.peso)>0).sort((a,b)=>(a.data<b.data?1:-1))
+  return ms.length? Number(ms[0].peso):0
+}
+function gmdPasto(pid){
+  // ganho médio diário entre a 1ª e a última pesagem/registro com peso do pasto
+  const ms=(state.movimentos||[]).filter(m=>m.pastoId===pid && Number(m.peso)>0 && m.data).sort((a,b)=>(a.data<b.data?-1:1))
+  if(ms.length<2) return null
+  const a=ms[0], b=ms[ms.length-1]
+  const dias=(new Date(b.data)-new Date(a.data))/86400000
+  if(dias<=0) return null
+  return (Number(b.peso)-Number(a.peso))/dias
+}
+function evolucaoRebanho(){
+  // total de cabeças acumulado por data
+  const ms=(state.movimentos||[]).filter(m=>m.data && m.tipo!=='pesagem').slice().sort((a,b)=>(a.data<b.data?-1:1))
+  const porData={}; let acc=0
+  ms.forEach(m=>{
+    const q=Number(m.qtd)||0
+    if(m.tipo==='transferencia'){} // não muda total
+    else if(MOV_SAIDA.includes(m.tipo)) acc-=q
+    else acc+=q
+    porData[m.data.substring(0,10)]=acc
+  })
+  return Object.entries(porData).sort()
+}
+function indicadoresEstoque(){
+  const e=calcEstoque()
+  const mortes=(state.movimentos||[]).filter(m=>m.tipo==='morte').reduce((s,m)=>s+(Number(m.qtd)||0),0)
+  const entradasBrutas=(state.movimentos||[]).filter(m=>MOV_ENTRADA.includes(m.tipo)).reduce((s,m)=>s+(Number(m.qtd)||0),0)
+  const mortalidade= entradasBrutas? (mortes/entradasBrutas*100):0
+  // lotação total
+  let areaTotal=0, uaTotal=0
+  ;(state.pastos||[]).forEach(p=>{
+    areaTotal+=Number(p.areaHa)||0
+    const sp=e.porPasto[p.id]||{total:0}
+    const pm=pesoMedioPasto(p.id)
+    if(pm>0) uaTotal += (sp.total*pm)/UA_KG
+  })
+  return { total:e.total, mortes, mortalidade, areaTotal, uaTotal,
+    cabHa: areaTotal? e.total/areaTotal:0, uaHa: areaTotal? uaTotal/areaTotal:0 }
+}
+
 function renderModEstoque(c){
   if(!ehAdmin() && !(usuarioAtual()?.permissoes||[]).includes('estoque')) {}
   const e = calcEstoque()
   const pastos = state.pastos||[]
   const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;width:fit-content;margin-bottom:16px">
-      ${[['resumo','Resumo'],['pastos','Pastos'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
+      ${[['resumo','Resumo'],['pastos','Pastos'],['mapa','Mapa'],['desempenho','Desempenho'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
     </div>`
   let corpo = ''
 
@@ -2339,6 +2386,51 @@ function renderModEstoque(c){
         <input type="file" id="impEstoque" accept=".xlsx,.xls,.csv" style="display:none" onchange="importarSaldoEstoque(this.files[0])">
       </div>
       <div class="widget-grid">${modCard('Pastos e saldo atual', linhas || '<p style="color:#9ca3af;font-size:13px">Nenhum pasto. Cadastre ou importe do Excel.</p>')}</div>`
+  }
+
+  else if (estoqueView==='mapa') {
+    const cards = pastos.map(p=>{
+      const sp=e.porPasto[p.id]||{total:0}
+      const cap=Number(p.capacidade)||0
+      const ocup = cap? (sp.total/cap*100):0
+      let cor='#e5e7eb', txt='#6b7280', label='vazio'
+      if(sp.total>0){ if(!cap){cor='#dbeafe';txt='#1d4ed8';label='ocupado'} else if(ocup>100){cor='#fee2e2';txt='#dc2626';label='superlotado'} else if(ocup>=80){cor='#fef3c7';txt='#92400e';label='quase cheio'} else {cor='#dcfce7';txt='#166534';label='ok'} }
+      const det = e.cats.filter(cat=>sp[cat]>0).map(cat=>`${cat.replace('Bezerro','Bz')}: ${sp[cat]}`).join(' · ')
+      return `<div style="background:${cor};border-radius:14px;padding:14px;min-height:96px">
+        <div style="font-weight:700;color:#111;font-size:14px;margin-bottom:4px">${p.nome}</div>
+        <div style="font-size:22px;font-weight:800;color:${txt};letter-spacing:-.5px">${fmtNum(sp.total)}<span style="font-size:11px;font-weight:600"> cab</span></div>
+        <div style="font-size:10px;color:${txt};font-weight:700;text-transform:uppercase;letter-spacing:.04em">${label}${cap?` · ${ocup.toFixed(0)}% de ${cap}`:''}</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:6px;line-height:1.4">${det||'—'}</div>
+      </div>`
+    }).join('')
+    corpo = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">${cards||'<p style="color:#9ca3af;font-size:13px">Cadastre pastos para ver o mapa.</p>'}</div>
+      <p style="font-size:11px;color:#9ca3af;margin-top:12px">🟩 ok · 🟨 quase cheio (≥80%) · 🟥 superlotado · ⬜ vazio — defina a <strong>capacidade</strong> do pasto para calcular a ocupação.</p>`
+  }
+
+  else if (estoqueView==='desempenho') {
+    const ind=indicadoresEstoque()
+    const evol=evolucaoRebanho()
+    const gmds=pastos.map(p=>({nome:p.nome, gmd:gmdPasto(p.id)})).filter(x=>x.gmd!=null)
+    const gmdMedio = gmds.length? gmds.reduce((s,x)=>s+x.gmd,0)/gmds.length:null
+    const kpis=`<div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Total de Cabeças</div><div class="kpi-value">${fmtNum(ind.total)}</div></div>
+      <div class="kpi"><div class="kpi-label">Mortalidade</div><div class="kpi-value ${ind.mortalidade>3?'neg':'pos'}">${ind.mortalidade.toFixed(1)}%</div><div class="kpi-sub">${ind.mortes} mortes</div></div>
+      <div class="kpi"><div class="kpi-label">Lotação</div><div class="kpi-value blue">${ind.cabHa?ind.cabHa.toFixed(2)+' cab/ha':'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Lotação (UA/ha)</div><div class="kpi-value yellow">${ind.uaHa?ind.uaHa.toFixed(2):'—'}</div><div class="kpi-sub">${ind.uaHa?'1 UA=450kg':'registre pesagens'}</div></div>
+      <div class="kpi"><div class="kpi-label">GMD médio</div><div class="kpi-value pos">${gmdMedio!=null?gmdMedio.toFixed(3)+' kg/dia':'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Área Total</div><div class="kpi-value">${fmtNum(ind.areaTotal)} ha</div></div>
+    </div>`
+    const gmdLista = gmds.length? gmds.map(x=>`<div class="dre-row"><span class="dre-label">${x.nome}</span><span class="dre-val ${x.gmd>=0?'pos':'neg'}">${x.gmd.toFixed(3)} kg/dia</span></div>`).join('') : '<p style="color:#9ca3af;font-size:13px">Registre <strong>2+ pesagens</strong> num pasto (movimentação tipo "Pesagem") para calcular o GMD.</p>'
+    corpo=`<div class="widget-grid">
+      ${modCard('Indicadores de desempenho', kpis)}
+      ${modCard('Evolução do rebanho', `<div class="chart-wrap"><canvas id="cEvolRebanho"></canvas></div>`)}
+      ${modCard('GMD por pasto', gmdLista, 'half')}
+    </div>`
+    requestAnimationFrame(()=>{
+      if(evol.length){ initChart('cEvolRebanho','line',
+        {labels:evol.map(([d])=>fmtDataCot(d)),datasets:[{label:'Cabeças',data:evol.map(([,v])=>v),borderColor:'#0c064b',backgroundColor:'rgba(12,6,75,.08)',fill:true,tension:.3,pointRadius:2,borderWidth:2}]},
+        {plugins:{legend:{display:false}},scales:{y:{grid:{color:'#f3f4f6'}}}}) }
+    })
   }
 
   else { // movimentos
@@ -2404,6 +2496,7 @@ function novaMovimentacao(){
         <select class="form-input" id="mv_tipo" onchange="document.getElementById('mv_dest_wrap').style.display=this.value==='transferencia'?'block':'none'">
           <option value="saldo_inicial">Saldo inicial</option><option value="compra">Compra</option><option value="nascimento">Nascimento</option>
           <option value="transferencia">Transferência entre pastos</option><option value="venda">Venda</option><option value="morte">Morte</option>
+          <option value="pesagem">Pesagem (registrar peso, não muda saldo)</option>
         </select></div>
       <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="mv_data" type="date" value="${new Date().toISOString().substring(0,10)}"></div>
     </div>
@@ -2424,15 +2517,18 @@ function novaMovimentacao(){
 }
 function salvarMovimentacao(){
   const tipo=document.getElementById('mv_tipo').value
-  const qtd=parseInt(document.getElementById('mv_qtd').value)
+  const qtd=parseInt(document.getElementById('mv_qtd').value)||0
+  const peso=parseFloat(document.getElementById('mv_peso').value)||null
   const erro=document.getElementById('mv_erro')
-  if(isNaN(qtd)||qtd<=0){ erro.textContent='Informe a quantidade.'; return }
+  if(tipo==='pesagem'){
+    if(!peso || peso<=0){ erro.textContent='Na pesagem, informe o peso médio (kg).'; return }
+  } else if(isNaN(qtd)||qtd<=0){ erro.textContent='Informe a quantidade.'; return }
   if(!state.movimentos) state.movimentos=[]
   const m={ id:'mv_'+Math.random().toString(36).slice(2), data:document.getElementById('mv_data').value||null,
     tipo, categoria:document.getElementById('mv_cat').value, qtd,
     pastoId:document.getElementById('mv_pasto').value,
     pastoDestinoId: tipo==='transferencia'?document.getElementById('mv_dest').value:null,
-    peso:parseFloat(document.getElementById('mv_peso').value)||null, obs:document.getElementById('mv_obs').value.trim() }
+    peso, obs:document.getElementById('mv_obs').value.trim() }
   if(tipo==='transferencia' && m.pastoId===m.pastoDestinoId){ erro.textContent='Origem e destino devem ser diferentes.'; return }
   state.movimentos.push(m)
   saveState()
