@@ -2523,11 +2523,11 @@ function renderModCaixa(c) {
     const v = meses[m]
     saldoAcum += v.ent - v.sai
     return `<div class="dre-row">
-      <span class="dre-label">${formatMes(m)}</span>
+      <span class="dre-label" style="white-space:nowrap">${formatMes(m)}</span>
       <span class="dre-val" style="gap:16px">
-        <span class="pos">+${fmt(v.ent)}</span>
-        <span class="neg">-${fmt(v.sai)}</span>
-        <span class="${saldoAcum>=0?'pos':'neg'}" style="min-width:110px;text-align:right">${fmt(saldoAcum)}</span>
+        <span class="pos" style="min-width:104px;text-align:right;white-space:nowrap">+${fmt(v.ent)}</span>
+        <span class="neg" style="min-width:104px;text-align:right;white-space:nowrap">-${fmt(v.sai)}</span>
+        <span class="${saldoAcum>=0?'pos':'neg'}" style="min-width:118px;text-align:right;white-space:nowrap">${fmt(saldoAcum)}</span>
       </span>
     </div>`
   }).join('')
@@ -2558,7 +2558,7 @@ function renderModCaixa(c) {
         <div class="kpi"><div class="kpi-label">+60 dias</div><div class="kpi-value ${saldoFinal+mediaMensal*2>=0?'pos':'neg'}">${fmt(saldoFinal+mediaMensal*2)}</div></div>
         <div class="kpi"><div class="kpi-label">+90 dias</div><div class="kpi-value ${saldoFinal+mediaMensal*3>=0?'pos':'neg'}">${fmt(saldoFinal+mediaMensal*3)}</div></div>
       </div>`)}
-      ${modCard('Movimentação Mensal (saldo acumulado)', linhas || '<p style="color:#9ca3af;font-size:13px">Sem datas nos lançamentos para montar o fluxo.</p>')}
+      ${modCard('Movimentação Mensal (saldo acumulado)', `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:430px">${linhas || '<p style="color:#9ca3af;font-size:13px">Sem datas nos lançamentos para montar o fluxo.</p>'}</div></div>`)}
     </div>`
 }
 
@@ -3205,10 +3205,12 @@ function renderModAgricultura(c) {
     selEnt +
     `<div class="widget-grid">
       ${modCard('Culturas da safra — '+ent.nome, `
-        <div style="display:grid;grid-template-columns:1.1fr .65fr .7fr .5fr .8fr .9fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
-          <span>Cultura</span><span>Área(ha)</span><span>Produção</span><span>Un.</span><span>Preço/un</span><span>Custo total</span><span></span>
-        </div>
-        ${linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma cultura. Adicione abaixo.</p>'}
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:600px">
+          <div style="display:grid;grid-template-columns:1.1fr .65fr .7fr .5fr .8fr .9fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
+            <span>Cultura</span><span>Área(ha)</span><span>Produção</span><span>Un.</span><span>Preço/un</span><span>Custo total</span><span></span>
+          </div>
+          ${linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma cultura. Adicione abaixo.</p>'}
+        </div></div>
         <div style="margin-top:10px"><button class="btn-secondary" onclick="addSafra()">+ Adicionar cultura</button></div>
         <p style="font-size:11px;color:#9ca3af;margin-top:8px">Unidade <strong>sc</strong> = saca de 60kg; use <strong>kg</strong> para culturas como o gergelim. Informe o <strong>custo total</strong> de cada cultura para ver custo/ha, custo/un e margem.</p>
       `)}
@@ -3254,11 +3256,11 @@ function renderModComparativo(c) {
   const linha = (label, va, vb, fmtFn=fmt) => {
     const dif = vb - va
     const pct = va ? (dif/Math.abs(va)*100) : 0
-    return `<div class="dre-row hl"><span class="dre-label">${label}</span>
+    return `<div class="dre-row hl"><span class="dre-label" style="white-space:nowrap">${label}</span>
       <span class="dre-val" style="gap:14px">
-        <span style="min-width:90px;text-align:right;color:#374151">${fmtFn(va)}</span>
-        <span style="min-width:90px;text-align:right;color:#374151">${fmtFn(vb)}</span>
-        <span style="min-width:90px;text-align:right" class="${dif>=0?'pos':'neg'}">${dif>=0?'▲':'▼'} ${fmtFn(Math.abs(dif))} (${pct.toFixed(0)}%)</span>
+        <span style="min-width:90px;text-align:right;color:#374151;white-space:nowrap">${fmtFn(va)}</span>
+        <span style="min-width:90px;text-align:right;color:#374151;white-space:nowrap">${fmtFn(vb)}</span>
+        <span style="min-width:110px;text-align:right;white-space:nowrap" class="${dif>=0?'pos':'neg'}">${dif>=0?'▲':'▼'} ${fmtFn(Math.abs(dif))} (${pct.toFixed(0)}%)</span>
       </span></div>`
   }
   c.innerHTML = pageHeader(ICON.comparativo,'Comparativo entre Períodos','Variação de um período para outro') +
@@ -3269,11 +3271,13 @@ function renderModComparativo(c) {
       <select class="filter-input" onchange="window._cmpB=this.value;renderModComparativo(document.getElementById('viewGeneric'))">${opt(window._cmpB)}</select>
     </div>
     <div class="widget-grid">${modCard(`Comparativo: ${formatMes(window._cmpA)} → ${formatMes(window._cmpB)}`, `
-      <div class="dre-row"><span class="dre-label b">Indicador</span><span class="dre-val" style="gap:14px"><span style="min-width:90px;text-align:right">A</span><span style="min-width:90px;text-align:right">B</span><span style="min-width:90px;text-align:right">Variação</span></span></div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:540px">
+      <div class="dre-row"><span class="dre-label b">Indicador</span><span class="dre-val" style="gap:14px"><span style="min-width:90px;text-align:right">A</span><span style="min-width:90px;text-align:right">B</span><span style="min-width:110px;text-align:right">Variação</span></span></div>
       ${linha('Receita', A.receitaTotal, B.receitaTotal)}
       ${linha('Despesa', A.despesaTotal, B.despesaTotal)}
       ${linha('Resultado', A.resultado, B.resultado)}
       ${linha('Margem (%)', A.margem, B.margem, v=>v.toFixed(1)+'%')}
+      </div></div>
     `)}</div>`
 }
 
