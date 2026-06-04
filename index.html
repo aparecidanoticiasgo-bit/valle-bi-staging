@@ -2682,8 +2682,8 @@ function valorRebanho(cots){
 async function renderModEstoque(c){
   const e = calcEstoque()
   const pastos = state.pastos||[]
-  const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;width:fit-content;margin-bottom:16px">
-      ${[['resumo','Resumo'],['pastos','Pastos'],['mapa','Mapa'],['desempenho','Desempenho'],['custos','Custo/Atividade'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
+  const tabs = `<div class="tabs" style="display:flex;gap:1px;background:rgba(120,120,128,.1);padding:4px;border-radius:12px;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:16px">
+      ${[['resumo','Resumo'],['pastos','Pastos'],['mapa','Mapa'],['desempenho','Desempenho'],['custos','Custo/Atividade'],['movimentos','Movimentações']].map(([k,l])=>`<button class="nav-btn ${estoqueView===k?'active':''}" style="flex:0 0 auto;white-space:nowrap" onclick="estoqueView='${k}';renderModEstoque(document.getElementById('viewGeneric'))">${l}</button>`).join('')}
     </div>`
   let corpo = ''
 
@@ -2729,7 +2729,7 @@ async function renderModEstoque(c){
         <button class="btn-secondary" onclick="document.getElementById('impEstoque').click()">⬆ Importar saldo (Excel)</button>
         <input type="file" id="impEstoque" accept=".xlsx,.xls,.csv" style="display:none" onchange="importarSaldoEstoque(this.files[0])">
       </div>
-      <div class="widget-grid">${modCard('Pastos e saldo atual', linhas || '<p style="color:#9ca3af;font-size:13px">Nenhum pasto. Cadastre ou importe do Excel.</p>')}</div>`
+      <div class="widget-grid">${modCard('Pastos e saldo atual', linhas ? `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:520px">${linhas}</div></div>` : '<p style="color:#9ca3af;font-size:13px">Nenhum pasto. Cadastre ou importe do Excel.</p>')}</div>`
   }
 
   else if (estoqueView==='mapa') {
@@ -2784,14 +2784,16 @@ async function renderModEstoque(c){
     const linhas = ca.linhas.map(l=>`<div class="dre-row hl" style="align-items:center">
         <span class="dre-label"><strong>${l.atividade}</strong> <span style="color:#9ca3af;font-weight:400">· ${fmtNum(l.cab)} cab · ${l.pct.toFixed(0)}% do rebanho</span></span>
         <span class="dre-val" style="gap:14px">
-          <span class="neg">${fmt(l.aloc)}</span>
-          <span style="min-width:90px;text-align:right">${fmt(l.custoCab)}/cab</span>
-          <span style="min-width:90px;text-align:right">${l.custoArroba?fmt(l.custoArroba)+'/@':'—'}</span>
+          <span class="neg" style="min-width:96px;text-align:right;white-space:nowrap">${fmt(l.aloc)}</span>
+          <span style="min-width:96px;text-align:right;white-space:nowrap">${fmt(l.custoCab)}/cab</span>
+          <span style="min-width:90px;text-align:right;white-space:nowrap">${l.custoArroba?fmt(l.custoArroba)+'/@':'—'}</span>
         </span></div>`).join('')
     corpo = `<div class="widget-grid">${modCard('Custo por Atividade (rateio do DRE pelo rebanho)', `
-        <div class="dre-row"><span class="dre-label b">Atividade</span><span class="dre-val" style="gap:14px"><span>Custo alocado</span><span style="min-width:90px;text-align:right">Custo/cab</span><span style="min-width:90px;text-align:right">Custo/@</span></span></div>
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:520px">
+        <div class="dre-row"><span class="dre-label b">Atividade</span><span class="dre-val" style="gap:14px"><span style="min-width:96px;text-align:right">Custo alocado</span><span style="min-width:96px;text-align:right">Custo/cab</span><span style="min-width:90px;text-align:right">Custo/@</span></span></div>
         ${linhas || '<p style="color:#9ca3af;font-size:13px">Cadastre pastos com rebanho e defina a <strong>atividade</strong> de cada um.</p>'}
         <div class="dre-row total"><span class="dre-label b">Despesa total (DRE)</span><span class="dre-val b neg">${fmt(ca.desp)}</span></div>
+        </div></div>
         <p style="font-size:11px;color:#9ca3af;margin-top:8px">O custo do DRE é rateado entre as atividades pela <strong>proporção de cabeças</strong> de cada uma. Custo/@ aparece quando há pesagens. ${semAtiv?'⚠️ Há pastos sem atividade definida (entram como "Não definido") — edite os pastos para classificar.':''}</p>
       `)}</div>`
   }
@@ -2809,7 +2811,7 @@ async function renderModEstoque(c){
         <span class="dre-val" style="color:#6b7280;font-weight:600">${m.data?fmtDataCot(m.data):''} <button class="nav-btn" style="color:#dc2626" onclick="excluirMovimento('${m.id}')">✕</button></span></div>`
     }).join('')
     corpo = `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novaMovimentacao()">+ Lançar Movimentação</button></div>
-      <div class="widget-grid">${modCard('Movimentações (últimas 100)', linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma movimentação ainda.</p>')}</div>`
+      <div class="widget-grid">${modCard('Movimentações (últimas 100)', linhas ? `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:460px">${linhas}</div></div>` : '<p style="color:#9ca3af;font-size:13px">Nenhuma movimentação ainda.</p>')}</div>`
   }
 
   c.innerHTML = pageHeader(ICON.estoque,'Estoque Animal','Rebanho por pasto e categoria — saldo automático') + tabs + corpo
