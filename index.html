@@ -4764,7 +4764,7 @@ function mostrarProximoAviso(){
   if(cm.imagem_url) html+=`<img src="${escapeHtml(cm.imagem_url)}" style="max-width:100%;border-radius:12px;border:1px solid #ececf0;margin-bottom:12px">`
   if(cm.mensagem) html+=`<div style="font-size:14px;color:#1d1d1f;line-height:1.55;white-space:pre-wrap;margin-bottom:14px">${escapeHtml(cm.mensagem)}</div>`
   if(cm.link) html+=`<a href="${escapeHtml(cm.link)}" target="_blank" rel="noopener" class="btn-primary" style="display:inline-block;text-decoration:none;margin-bottom:8px">${escapeHtml(cm.link_label||'Abrir link')}</a>`
-  html+=`<div style="font-size:11px;color:#9ca3af;margin-top:10px">Comunicado da Valle Soluções e Gestão${cm.autor?(' · '+escapeHtml(cm.autor)):''} · ${fmtDataHora(cm.criado_em)}</div>`
+  html+=`<div style="font-size:11px;color:#9ca3af;margin-top:10px">Comunicado da Valle Soluções${cm.autor?(' · '+escapeHtml(cm.autor)):''} · ${fmtDataHora(cm.criado_em)}</div>`
   html+=`<div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">${_avisoFila.length>1?`<span style="align-self:center;font-size:11px;color:#9ca3af">${_avisoFila.length} comunicados</span>`:''}<button class="btn-primary" onclick="fecharAviso()">OK, entendi</button></div>`
   document.getElementById('avisoBody').innerHTML = html
   ov.classList.remove('hidden')
